@@ -3,14 +3,11 @@
 import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Scale,
-  Snowflake,
-  Sparkles,
-  Zap,
-  Ban,
-  AlertTriangle,
+  Scale, Snowflake, Sparkles, Zap, Ban, AlertTriangle, Lock,
 } from 'lucide-react';
 import { useNomosStore } from '@/lib/nomos-store';
+import { useAuthStore } from '@/lib/auth-store';
+import { AuthGate, WaitlistAdminPanel } from '@/components/nomos/AuthGate';
 import { ThemeToggle } from '@/components/nomos/ThemeToggle';
 import { TruthBadge } from '@/components/nomos/TruthBadge';
 import { ContextBuilder } from '@/components/nomos/ContextBuilder';
@@ -40,12 +37,15 @@ export default function Page() {
   const loading = useNomosStore((s) => s.loading);
   const presets = useNomosStore((s) => s.presets);
   const applyPreset = useNomosStore((s) => s.applyPreset);
+  const user = useAuthStore((s) => s.user);
+  const loadingAuth = useAuthStore((s) => s.loadingAuth);
 
   useEffect(() => {
-    if (!initialized) {
+    // Only load the dashboard data once the user is authenticated.
+    if (user && !initialized) {
       void init();
     }
-  }, [init, initialized]);
+  }, [init, initialized, user]);
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -89,75 +89,86 @@ export default function Page() {
       </header>
 
       <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6">
-        {/* Hero — quick-start presets */}
-        <section
-          aria-label="Demo presets"
-          className="mb-6"
-        >
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Quick-start demo presets</h2>
-            <span className="text-[10px] text-muted-foreground">
-              Each preset is a self-contained ContextRequest — clicking loads & evaluates.
-            </span>
-          </div>
-          {loading && !presets ? (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-20 w-full" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              {presets?.map((p, i) => (
-                <motion.button
-                  key={p.id}
-                  type="button"
-                  onClick={() => applyPreset(p)}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.25, delay: i * 0.05 }}
-                  className="group flex flex-col items-start gap-1 rounded-md border border-border bg-card p-3 text-left transition-all hover:border-emerald-500/50 hover:bg-emerald-500/5 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                  aria-label={`Apply preset ${p.label}`}
-                >
-                  <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
-                    <Sparkles className="size-3" aria-hidden />
-                    Preset
-                  </span>
-                  <span className="text-xs font-semibold leading-tight">{p.label}</span>
-                  <span className="line-clamp-2 text-[10px] text-muted-foreground">{p.description}</span>
-                </motion.button>
-              ))}
-            </div>
-          )}
-        </section>
+        {/* Authentication gate — sign in / join waitlist / demo logins */}
+        <AuthGate />
 
-        {/* Workspace — 3-column responsive grid */}
-        <section
-          aria-label="Decision workspace"
-          className="grid grid-cols-1 gap-4 lg:grid-cols-12"
-        >
-          {/* Left — Context Builder */}
-          <div className="min-w-0 lg:col-span-4">
-            <ContextBuilder />
-          </div>
-          {/* Center — Decision Result */}
-          <div className="min-w-0 lg:col-span-5">
-            <DecisionResult />
-          </div>
-          {/* Right — Architecture Transparency */}
-          <aside className="flex min-w-0 flex-col gap-4 lg:col-span-3" aria-label="Architecture transparency">
-            <PackageRegistry />
-            <JurisdictionGraphPanel />
-            <TruthModelReference />
-            <AuditTrail />
-          </aside>
-        </section>
+        {/* When unauthenticated, show a public preview above the footer */}
+        {!user && !loadingAuth ? (
+          <section aria-label="Public preview" className="mt-6">
+            <PublicPreview />
+          </section>
+        ) : null}
 
-        {/* Below — invariants + planes */}
-        <section aria-label="Architecture reference" className="mt-6 space-y-4">
-          <InvariantsReference />
-          <PlanesOverview />
-        </section>
+        {/* When authenticated, show admin panel (if admin) + full dashboard */}
+        {user ? (
+          <>
+            <WaitlistAdminPanel />
+
+            {/* Quick-start presets */}
+            <section aria-label="Demo presets" className="mb-6">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-semibold">Quick-start demo presets</h2>
+                <span className="text-[10px] text-muted-foreground">
+                  Each preset is a self-contained ContextRequest — clicking loads & evaluates.
+                </span>
+              </div>
+              {loading && !presets ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Skeleton key={i} className="h-20 w-full" />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {presets?.map((p, i) => (
+                    <motion.button
+                      key={p.id}
+                      type="button"
+                      onClick={() => applyPreset(p)}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.25, delay: i * 0.05 }}
+                      className="group flex flex-col items-start gap-1 rounded-md border border-border bg-card p-3 text-left transition-all hover:border-emerald-500/50 hover:bg-emerald-500/5 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                      aria-label={`Apply preset ${p.label}`}
+                    >
+                      <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                        <Sparkles className="size-3" aria-hidden />
+                        Preset
+                      </span>
+                      <span className="text-xs font-semibold leading-tight">{p.label}</span>
+                      <span className="line-clamp-2 text-[10px] text-muted-foreground">{p.description}</span>
+                    </motion.button>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* Workspace — 3-column responsive grid */}
+            <section
+              aria-label="Decision workspace"
+              className="grid grid-cols-1 gap-4 lg:grid-cols-12"
+            >
+              <div className="min-w-0 lg:col-span-4">
+                <ContextBuilder />
+              </div>
+              <div className="min-w-0 lg:col-span-5">
+                <DecisionResult />
+              </div>
+              <aside className="flex min-w-0 flex-col gap-4 lg:col-span-3" aria-label="Architecture transparency">
+                <PackageRegistry />
+                <JurisdictionGraphPanel />
+                <TruthModelReference />
+                <AuditTrail />
+              </aside>
+            </section>
+
+            {/* Below — invariants + planes */}
+            <section aria-label="Architecture reference" className="mt-6 space-y-4">
+              <InvariantsReference />
+              <PlanesOverview />
+            </section>
+          </>
+        ) : null}
       </main>
 
       {/* Sticky footer */}
@@ -181,7 +192,7 @@ export default function Page() {
               </span>
               <span className="inline-flex items-center gap-1 rounded-full border border-teal-500/30 bg-teal-500/10 px-2 py-0.5 font-mono text-[10px] text-teal-700 dark:text-teal-300">
                 <AlertTriangle className="size-2.5" aria-hidden />
-                identity: id_guest
+                {user ? `signed in: ${user.email}` : 'not signed in'}
               </span>
             </div>
           </div>
@@ -191,6 +202,39 @@ export default function Page() {
           </p>
         </div>
       </footer>
+    </div>
+  );
+}
+
+/**
+ * PublicPreview — shown when unauthenticated. Renders a read-only overview of
+ * the architecture so visitors can see what the platform is before signing in.
+ */
+function PublicPreview() {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-6 text-center">
+        <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-emerald-500/15">
+          <Lock className="size-6 text-emerald-600" aria-hidden />
+        </div>
+        <h2 className="text-lg font-semibold">Sign in to access the platform</h2>
+        <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+          Nomos is an authenticated rules-and-reality operating system. Use a demo account above for instant access, or join the waitlist to request a real account.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { title: 'Frozen Kernel', body: 'Domain-agnostic primitives — entities, facts, jurisdictions, rules, evidence, decisions. I1: never vertical-coupled.', color: 'border-emerald-500/30 bg-emerald-500/5' },
+          { title: 'Deterministic Rule Engine', body: 'RuleIR + ConditionNode trees. LLMs never authoritative (I5). Provenance on every decision (I6).', color: 'border-amber-500/30 bg-amber-500/5' },
+          { title: 'Truth/Confidence Model', body: 'T0–T5 preserved end-to-end: storage → reasoning → UI → audit. Community (T4) never masquerades as authority (I8).', color: 'border-rose-500/30 bg-rose-500/5' },
+          { title: 'Composable Packages', body: 'Jurisdiction + Domain + Situation + Capability packs. Add a country, treaty, or vertical WITHOUT touching the kernel.', color: 'border-violet-500/30 bg-violet-500/5' },
+        ].map((c) => (
+          <div key={c.title} className={cn('rounded-md border p-3', c.color)}>
+            <h3 className="text-sm font-semibold">{c.title}</h3>
+            <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{c.body}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

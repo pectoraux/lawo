@@ -1,14 +1,11 @@
 // =============================================================================
 // Nomos — Platform Foundation Schema (Plane E)
 // =============================================================================
-// This schema implements the domain-agnostic kernel persistence layer.
-// All types are SQLite-compatible: no native enums (allowed values documented
-// inline), no Json-array columns (lists are stored as JSON-encoded String).
+// PostgreSQL (Neon) — native enums supported. Auth models aligned with
+// NextAuth.js v4 + Prisma Adapter conventions.
 //
-// Vertical/domain concepts (InsuranceClaim, ADU, AfCFTAShipment, etc.) live
-// in package data and are NEVER represented as Prisma models. They are
-// serialized into the appropriate *Json String fields below (stateJson,
-// provenanceJson, payloadJson, manifestJson, ruleJson, etc.).
+// Domain-agnostic kernel persistence: vertical concepts (InsuranceClaim, ADU,
+// AfCFTAShipment, etc.) live in package data, never as Prisma models.
 // =============================================================================
 
 generator client {
@@ -16,160 +13,311 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // -----------------------------------------------------------------------------
-// Tenant — a single actor scope. A tenant may be an individual, a household,
-// a business, or any other principal that owns data.
-//
-// `kind` allowed values (String, SQLite has no native enum):
-//   INDIVIDUAL | HOUSEHOLD | SMALL_BUSINESS | ENTERPRISE | PROFESSIONAL_ORG |
-//   GOVERNMENT | EMBEDDED
+// Enums
 // -----------------------------------------------------------------------------
-model Tenant {
-  id        String   @id @default(cuid())
-  name      String
-  kind      String   // see allowed values above
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
-  // Relations (kept unobtrusive; FK lookups still available via these)
-  auditEvents AuditEvent[]
-  decisions   DecisionRecord[]
-  facts       FactRecord[]
-  evidence    EvidenceRecord[]
+enum UserRole {
+  GUEST
+  USER
+  OPERATOR
+  PACKAGER
+  ADMIN
+}
+
+enum UserStatus {
+  WAITLISTED
+  ACTIVE
+  DISABLED
+}
+
+enum TenantKind {
+  INDIVIDUAL
+  HOUSEHOLD
+  SMALL_BUSINESS
+  ENTERPRISE
+  PROFESSIONAL_ORG
+  GOVERNMENT
+  EMBEDDED
+}
+
+enum AuditSeverity {
+  INFO
+  WARN
+  ERROR
+  CRITICAL
+}
+
+enum TruthLevel {
+  T0
+  T1
+  T2
+  T3
+  T4
+  T5
+}
+
+enum PackageCategory {
+  JURISDICTION
+  DOMAIN
+  SITUATION
+  CAPABILITY
+}
+
+enum JurisdictionKind {
+  COUNTRY
+  REGION
+  STATE
+  MUNICIPALITY
+  REGULATOR
+  COURT
+  SPECIAL_ZONE
+  FREE_ZONE
+  SUPRANATIONAL
+  BILATERAL
+  INTERNATIONAL
+}
+
+// -----------------------------------------------------------------------------
+// Identity — NextAuth User. Email is the login handle.
+//
+// `role`     : GUEST | USER | OPERATOR | PACKAGER | ADMIN — drives capability.
+// `status`   : WAITLISTED (signup pending admin approval) | ACTIVE | DISABLED.
+// `isDemo`   : true for seed demo accounts (quick-login buttons shown in UI).
+// `tenantId` : the user's personal tenant (created at activation).
+// -----------------------------------------------------------------------------
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  emailVerified DateTime?
+  passwordHash String?
+  name          String?
+  image         String?
+  role          UserRole  @default(GUEST)
+  status        UserStatus @default(WAITLISTED)
+  isDemo        Boolean    @default(false)
+  tenantId      String?
+  tenant        Tenant?    @relation(fields: [tenantId], references: [id])
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+
+  // Waitlist entries this user has reviewed (admin only)
+  reviewedWaitlist WaitlistEntry[] @relation("WaitlistReviewer")
+
+  @@index([status])
+  @@index([role])
+}
+
+// NextAuth OAuth/credentials account linkage (kept for completeness; we use Credentials only).
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// -----------------------------------------------------------------------------
+// WaitlistEntry — a sign-up request awaiting admin approval.
+//
+// When an admin approves an entry, a User (status=ACTIVE) is created and the
+// entry is marked APPROVED with `approvedAt` and `approvedById`.
+// -----------------------------------------------------------------------------
+
+enum WaitlistStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model WaitlistEntry {
+  id          String         @id @default(cuid())
+  email       String         @unique
+  name        String?
+  objective   String?
+  status      WaitlistStatus @default(PENDING)
+  requestedAt DateTime       @default(now())
+  reviewedAt  DateTime?
+  reviewedById String?
+  reviewedBy  User?          @relation("WaitlistReviewer", fields: [reviewedById], references: [id])
+  notes       String?
+
+  @@index([status])
+  @@index([requestedAt])
+}
+
+// -----------------------------------------------------------------------------
+// Tenant — a single actor scope. A user has one personal tenant by default.
+// -----------------------------------------------------------------------------
+
+model Tenant {
+  id        String     @id @default(cuid())
+  name      String
+  kind      TenantKind @default(INDIVIDUAL)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  users         User[]
+  auditEvents   AuditEvent[]
+  decisions     DecisionRecord[]
+  facts         FactRecord[]
+  evidence      EvidenceRecord[]
 }
 
 // -----------------------------------------------------------------------------
 // AuditEvent — append-only audit log entry.
-//
-// `severity` allowed values: INFO | WARN | ERROR | CRITICAL
-// `payloadJson` is a JSON-encoded `Record<string, unknown>` (AuditEvent.payload).
 // -----------------------------------------------------------------------------
+
 model AuditEvent {
-  id          String   @id @default(cuid())
-  tenantId    String?  // nullable: null = GLOBAL (public knowledge)
-  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
-  actor       String   // who/what performed the action (userId, system, etc.)
-  action      String   // e.g. "decision.compute", "package.ingest"
-  subjectId   String?  // the entity/decision/rule the action acted upon
-  timestamp   DateTime @default(now())
-  severity    String   // INFO | WARN | ERROR | CRITICAL
-  payloadJson String   // JSON-encoded AuditEvent.payload object
+  id          String       @id @default(cuid())
+  tenantId    String?
+  tenant      Tenant?      @relation(fields: [tenantId], references: [id])
+  actor       String
+  action      String
+  subjectId   String?
+  timestamp   DateTime     @default(now())
+  severity    AuditSeverity @default(INFO)
+  payloadJson Json
 
   @@index([tenantId, timestamp])
+  @@index([severity])
 }
 
 // -----------------------------------------------------------------------------
 // DecisionRecord — a persisted StateSnapshot decision with full provenance.
-//
-// `stateJson`       : full StateSnapshot serialized as JSON.
-// `provenanceJson`  : array of Provenance serialized as JSON.
-// `truthLevel`      : T0 | T1 | T2 | T3 | T4 | T5 (TruthLevel)
 // -----------------------------------------------------------------------------
+
 model DecisionRecord {
-  id             String   @id @default(cuid())
-  tenantId       String?
-  tenant         Tenant?  @relation(fields: [tenantId], references: [id])
-  subjectId     String
-  situationId   String?
-  stateJson     String   // full StateSnapshot serialized
-  provenanceJson String  // JSON array of Provenance
-  asOf          DateTime
-  computedAt    DateTime
-  truthLevel    String   // T0 | T1 | T2 | T3 | T4 | T5
+  id              String      @id @default(cuid())
+  tenantId        String?
+  tenant          Tenant?     @relation(fields: [tenantId], references: [id])
+  decisionId      String
+  subjectId       String
+  situationId     String?
+  stateJson       Json
+  provenanceJson  Json
+  asOf            DateTime
+  computedAt      DateTime
+  truthLevel      TruthLevel  @default(T0)
 
   @@index([tenantId, computedAt])
+  @@index([subjectId])
 }
 
 // -----------------------------------------------------------------------------
 // PackageRecord — a versioned package manifest in the registry.
-//
-// `category` allowed values: JURISDICTION | DOMAIN | SITUATION | CAPABILITY
-// `manifestJson` : full PackageManifest serialized as JSON.
 // -----------------------------------------------------------------------------
+
 model PackageRecord {
-  packageId   String   @unique
-  name        String
-  version     String
-  category    String   // JURISDICTION | DOMAIN | SITUATION | CAPABILITY
-  manifestJson String   // full PackageManifest serialized
-  publishedAt DateTime
-  signedBy    String
-  hash        String
+  packageId    String          @unique
+  name         String
+  version      String
+  category     PackageCategory
+  manifestJson Json
+  publishedAt  DateTime
+  signedBy     String
+  hash         String
 
   @@unique([packageId, version])
 }
 
 // -----------------------------------------------------------------------------
 // RuleVersion — an immutable, versioned Rule.
-//
-// `ruleJson`       : full Rule serialized as JSON (includes RuleIR).
-// `validFrom`      : when this version becomes effective.
-// `validTo`        : when this version stops being effective (null = open-ended).
-// `supersedes`     : prior ruleId+version that this replaces.
-// `supersededBy`   : future ruleId+version that replaces this.
 // -----------------------------------------------------------------------------
+
 model RuleVersion {
-  id           String   @id @default(cuid())
-  ruleId       String
-  version      Int
-  ruleJson     String   // full Rule serialized
+  id             String   @id @default(cuid())
+  ruleId         String
+  version        Int
+  ruleJson       Json
   jurisdictionId String
-  authorityId  String
-  sourceId     String
-  packageId    String
-  validFrom    DateTime
-  validTo      DateTime?
-  supersedes   String?
-  supersededBy String?
-  publishedAt  DateTime
-  ingestedAt   DateTime
+  authorityId    String
+  sourceId       String
+  packageId      String
+  validFrom      DateTime
+  validTo        DateTime?
+  supersedes     String?
+  supersededBy   String?
+  publishedAt    DateTime
+  ingestedAt     DateTime
 
   @@unique([ruleId, version])
   @@index([jurisdictionId, validFrom])
+  @@index([packageId])
 }
 
 // -----------------------------------------------------------------------------
 // JurisdictionRecord — a node in the jurisdiction graph.
-//
-// `parentIdsJson` : JSON array of parent jurisdiction ids (string[]).
-// `kind`          : COUNTRY | REGION | STATE | MUNICIPALITY | REGULATOR | COURT |
-//                   SPECIAL_ZONE | FREE_ZONE | SUPRANATIONAL | BILATERAL | INTERNATIONAL
 // -----------------------------------------------------------------------------
+
 model JurisdictionRecord {
-  id            String   @id @default(cuid())
-  code          String   @unique
-  name          String
-  kind          String   // see allowed values above
-  parentIdsJson String   // JSON array of parent ids
-  packageId     String
-  validFrom     DateTime
-  validTo       DateTime?
-  version       Int
-  supersedes    String?
-  supersededBy  String?
+  id           String           @id @default(cuid())
+  code         String           @unique
+  name         String
+  kind         JurisdictionKind
+  parentIds    String[]
+  packageId    String
+  validFrom    DateTime
+  validTo      DateTime?
+  version      Int
+  supersedes   String?
+  supersededBy String?
 }
 
 // -----------------------------------------------------------------------------
 // FactRecord — a stored observation (entity attribute).
-//
-// `valueJson`  : the fact's value, JSON-encoded.
-// `truthLevel` : T0 | T1 | T2 | T3 | T4 | T5
-// `sourceJson` : optional SourceRef serialized as JSON.
 // -----------------------------------------------------------------------------
+
 model FactRecord {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   subjectId     String
   attribute     String
-  valueJson     String   // JSON-encoded value
-  truthLevel    String   // T0 | T1 | T2 | T3 | T4 | T5
-  sourceJson    String?  // optional SourceRef serialized as JSON
-  observedAt    DateTime
+  value         Json
+  truthLevel    TruthLevel  @default(T0)
+  sourceJson    Json?
+  observedAt    DateTime    @default(now())
   tenantId      String?
-  tenant        Tenant?  @relation(fields: [tenantId], references: [id])
+  tenant        Tenant?     @relation(fields: [tenantId], references: [id])
   jurisdictionId String?
 
   @@index([subjectId, attribute])
@@ -178,17 +326,16 @@ model FactRecord {
 
 // -----------------------------------------------------------------------------
 // EvidenceRecord — a piece of evidence (e.g. a document/page/region) with
-// extracted facts.
-//
-// `extractedFactIdsJson` : JSON array of FactRecord ids (string[]).
+// extracted fact ids.
 // -----------------------------------------------------------------------------
+
 model EvidenceRecord {
-  id                    String   @id @default(cuid())
-  documentId            String?
-  page                  Int?
-  region                String?
-  extractedFactIdsJson  String   // JSON array of fact ids
-  confidence            Float
-  tenantId              String?
-  tenant                Tenant?  @relation(fields: [tenantId], references: [id])
+  id              String   @id @default(cuid())
+  documentId      String?
+  page            Int?
+  region          String?
+  extractedFactIds String[]
+  confidence      Float    @default(1.0)
+  tenantId        String?
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id])
 }
