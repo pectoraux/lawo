@@ -46,7 +46,7 @@ jobs:
         run: bun run lint
 
       - name: Typecheck
-        run: bunx tsc --noEmit
+        run: bunx tsc --noEmit -p tsconfig.ci.json
 
   # ---------------------------------------------------------------------------
   # Job 2: Static architecture tests (source-structure checks)

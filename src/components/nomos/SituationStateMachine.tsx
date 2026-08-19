@@ -48,7 +48,7 @@ export function SituationStateMachine({
     >
       {states.map((st, idx) => {
         const active = highlight.has(st.id);
-        const terminal = st.isTerminal === true;
+        const terminal = (st as { isTerminal?: boolean }).isTerminal === true;
         return (
           <div key={st.id} className="flex items-stretch gap-1" role="listitem">
             <motion.div

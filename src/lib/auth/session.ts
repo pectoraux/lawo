@@ -5,22 +5,32 @@
 import { getServerSession } from 'next-auth';
 import { authOptions } from './authOptions';
 
-export async function getSession() {
-  return getServerSession(authOptions);
+export interface SessionUser {
+  id: string;
+  email: string;
+  name: string | null;
+  role: 'GUEST' | 'USER' | 'OPERATOR' | 'PACKAGER' | 'ADMIN';
+  status: 'WAITLISTED' | 'ACTIVE' | 'DISABLED';
+  isDemo: boolean;
+  tenantId: string | null;
 }
 
-export type SessionUser = NonNullable<Awaited<ReturnType<typeof getSession>>>['user'];
+export async function getSession(): Promise<{ user: SessionUser } | null> {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return null;
+  return { user: session.user as unknown as SessionUser };
+}
 
-/** True if the current session is an ACTIVE admin. */
-export async function requireAdmin() {
+/** Returns the admin SessionUser if the current session is an ACTIVE admin, else null. */
+export async function requireAdmin(): Promise<SessionUser | null> {
   const session = await getSession();
   if (!session?.user) return null;
   if (session.user.role !== 'ADMIN' || session.user.status !== 'ACTIVE') return null;
   return session.user;
 }
 
-/** True if the current session is an ACTIVE user (any role). */
-export async function requireUser() {
+/** Returns the SessionUser if the current session is an ACTIVE user (any role), else null. */
+export async function requireUser(): Promise<SessionUser | null> {
   const session = await getSession();
   if (!session?.user || session.user.status !== 'ACTIVE') return null;
   return session.user;

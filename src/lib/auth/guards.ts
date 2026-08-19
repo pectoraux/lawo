@@ -27,10 +27,16 @@ export interface SessionUser {
   tenantId: string | null;
 }
 
-interface GuardResult {
-  user: SessionUser | null;
-  response: NextResponse | null;
-}
+/**
+ * Discriminated union so TypeScript can narrow: if `response` is non-null,
+ * `user` is null (and vice versa). Route handlers do:
+ *   const { user, response } = await requireUserWithScope(req);
+ *   if (response) return response;
+ *   // here `user` is narrowed to SessionUser (non-null)
+ */
+export type GuardResult =
+  | { user: SessionUser; response: null }
+  | { user: null; response: NextResponse };
 
 /**
  * Guards a POST/PUT/DELETE mutation: requires an authenticated ACTIVE user

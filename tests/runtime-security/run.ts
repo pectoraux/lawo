@@ -446,7 +446,7 @@ async function testIntegrity004(cookieA: string) {
   });
 
   record('INTEGRITY-004: Submitted facts normalized to session tenant',
-    computed && persisted && !!inA && !inB,
+    !!(computed && persisted && !!inA && !inB),
     !inA ? 'decision not persisted in tenant A' :
     inB ? 'CRITICAL: decision leaked into tenant B via facts!' :
     `computed=${computed}, persisted in tenant A (facts normalized)`);
@@ -540,11 +540,11 @@ async function testAtomicity001(cookieA: string) {
   });
   const ae = await db.auditEvent.findFirst({
     where: { correlationId },
-    select: { id: true, action: true, payloadJson: true },
+    select: { id: true, action: true, payloadJson: true, correlationId: true },
   });
 
   const bothExist = !!dr && !!ae;
-  const sameCorrelationId = dr?.decisionId === correlationId && ae?.correlationId === undefined; // ae found via correlationId column
+  const sameCorrelationId = dr?.decisionId === correlationId;
   const payloadHasRecordId = ae?.payloadJson && typeof ae.payloadJson === 'object' &&
     !!(ae.payloadJson as Record<string, unknown>).decisionRecordId;
 

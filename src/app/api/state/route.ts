@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
             action: 'decision.persist',
             subjectId: body.subjectId,
             severity: 'INFO',
-            payloadJson: sanitizedPayload,
+            payloadJson: sanitizedPayload as object,
             correlationId, // explicit bidirectional link to the DecisionRecord
           },
         });
