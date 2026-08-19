@@ -813,7 +813,9 @@ async function main() {
 
   // Verify dev server is running.
   try {
-    const res = await fetch(BASE, { signal: AbortSignal.timeout(5000) });
+    // Check /api/auth/csrf (lightweight — no page compilation) instead of
+    // the root page (which triggers Next.js compilation and may time out on CI).
+    const res = await fetch(`${BASE}/api/auth/csrf`, { signal: AbortSignal.timeout(15000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   } catch {
     console.error('Dev server not running on http://localhost:3000');
