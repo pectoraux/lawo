@@ -71,6 +71,13 @@ import {
   BORDER_CROSSING_PROCEDURES,
   BORDER_CROSSING_SITUATION,
 } from '@/lib/packages-data/border-crossing-situation';
+import {
+  GHANA_TOGO_BORDER_MANIFEST,
+  GHANA_TOGO_BORDER_AUTHORITIES,
+  GHANA_TOGO_BORDER_SOURCES,
+  GHANA_TOGO_BORDER_RULES,
+  GHANA_TOGO_BORDER_ACTIONS,
+} from '@/lib/packages-data/ghana-togo-border';
 
 // ---------------------------------------------------------------------------
 // LoadedPackage shape
@@ -184,6 +191,19 @@ export function loadBuiltinPackages(): LoadedPackage[] {
       situations: [BORDER_CROSSING_SITUATION],
       procedures: BORDER_CROSSING_PROCEDURES,
       actions: [],
+      evidence: [],
+    },
+    // 8. Ghana→Togo Border (DOMAIN — 3 rules + 2 actions)
+    {
+      manifest: GHANA_TOGO_BORDER_MANIFEST,
+      jurisdictions: [],
+      jurisdictionEdges: [],
+      authorities: GHANA_TOGO_BORDER_AUTHORITIES,
+      sources: GHANA_TOGO_BORDER_SOURCES,
+      rules: GHANA_TOGO_BORDER_RULES,
+      situations: [],
+      procedures: [],
+      actions: GHANA_TOGO_BORDER_ACTIONS,
       evidence: [],
     },
   ];

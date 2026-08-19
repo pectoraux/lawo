@@ -10,11 +10,14 @@
  *   - Prerelease identifiers compared element by element:
  *     - numeric identifiers compared numerically (10 > 2)
  *     - alphanumeric identifiers compared lexically (alpha < beta)
- *     - numeric > alphanumeric (1 > alpha)
+ *     - numeric < alphanumeric (per SemVer §11.4)
  *   - Build metadata is IGNORED for precedence (per SemVer spec)
  *
  * Range format (subset of npm):
- *   ^1.2.3   compatible-with: same major, >= 1.2.3 and < 2.0.0
+ *   ^1.2.3   compatible-with: >=1.2.3 <2.0.0 (major > 0)
+ *   ^0.2.3   compatible-with: >=0.2.3 <0.3.0 (major=0, minor>0)
+ *   ^0.0.3   compatible-with: >=0.0.3 <0.0.4 (major=0, minor=0)
+ *   ^0.9.9   compatible-with: >=0.9.9 <0.10.0 (major=0, minor>0)
  *   ~1.2.3   patch-only: same major+minor, >= 1.2.3 and < 1.3.0
  *   1.2.3    exact match
  *   >=1.2.3  greater-than-or-equal
@@ -40,11 +43,26 @@ export function parseSemver(v: string): ParsedSemver | null {
   if (typeof v !== 'string') return null;
   const m = v.trim().match(SEMVER_RE);
   if (!m) return null;
+
+  // SemVer §9: numeric identifiers MUST NOT include leading zeroes.
+  // This applies to the main version (enforced by regex) AND to
+  // prerelease identifiers (e.g., "1.2.3-01" is invalid).
+  const prerelease = m[4] ? m[4].split('.') : null;
+  if (prerelease) {
+    for (const part of prerelease) {
+      // A purely numeric prerelease identifier with >1 digit and a leading zero
+      // is invalid per SemVer §9.
+      if (/^\d+$/.test(part) && part.length > 1 && part.startsWith('0')) {
+        return null;
+      }
+    }
+  }
+
   return {
     major: parseInt(m[1]!, 10),
     minor: parseInt(m[2]!, 10),
     patch: parseInt(m[3]!, 10),
-    prerelease: m[4] ? m[4].split('.') : null,
+    prerelease,
     build: m[5] ?? null,
   };
 }
@@ -96,11 +114,11 @@ export function compareSemver(a: ParsedSemver, b: ParsedSemver): number {
       // Both numeric — compare numerically (10 > 2).
       if (aNum !== bNum) return aNum > bNum ? 1 : -1;
     } else if (!Number.isNaN(aNum) && Number.isNaN(bNum)) {
-      // Numeric > alphanumeric (per SemVer spec).
-      return 1;
-    } else if (Number.isNaN(aNum) && !Number.isNaN(bNum)) {
-      // Alphanumeric < numeric.
+      // Numeric < alphanumeric (per SemVer §11.4).
       return -1;
+    } else if (Number.isNaN(aNum) && !Number.isNaN(bNum)) {
+      // Alphanumeric > numeric.
+      return 1;
     } else {
       // Both alphanumeric — compare lexically.
       if (aPart !== bPart) return aPart! < bPart! ? -1 : 1;
@@ -136,14 +154,30 @@ export function satisfiesVersionRange(version: string, range: string): boolean {
   const v = parseSemver(version);
   if (!v) return false;
 
-  // ^ compatible-with
+  // ^ compatible-with (SemVer 2.0.0 §4.4.2)
+  // The behavior depends on which version components are zero:
+  //   ^1.2.3  (major > 0)         => >=1.2.3 <2.0.0
+  //   ^0.2.3  (major=0, minor>0)  => >=0.2.3 <0.3.0
+  //   ^0.0.3  (major=0, minor=0)  => >=0.0.3 <0.0.4
+  //   ^0.0.0  (major=0, minor=0)  => >=0.0.0 <0.0.1  (edge case: only 0.0.0 itself)
   if (r.startsWith('^')) {
     const base = r.slice(1).trim();
     const parsed = parseSemver(base);
     if (!parsed) return false;
-    if (v.major !== parsed.major) return false;
-    if (compareSemver(v, parsed) < 0) return false;
-    return true;
+    if (compareSemver(v, parsed) < 0) return false; // v >= base
+
+    // Compute the upper bound (exclusive) based on which component is the
+    // first non-zero one.
+    if (parsed.major > 0) {
+      // ^1.2.3 => <2.0.0
+      return v.major === parsed.major;
+    } else if (parsed.minor > 0) {
+      // ^0.2.3 => <0.3.0
+      return v.major === 0 && v.minor === parsed.minor;
+    } else {
+      // ^0.0.3 => <0.0.4
+      return v.major === 0 && v.minor === 0 && v.patch === parsed.patch;
+    }
   }
 
   // ~ patch-only
