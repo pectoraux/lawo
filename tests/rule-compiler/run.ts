@@ -308,6 +308,110 @@ async function testCompileRulesBatchFailsAtomically(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Hash distinctness regression tests (RULE-011)
+// These prove that materially different RuleIR produces different hashes.
+// The old JSON.stringify array-replacer bug would have caused some of these
+// to produce the SAME hash (nested properties were stripped).
+// ---------------------------------------------------------------------------
+
+async function testHashDistinctDifferentLeafValue(): Promise<void> {
+  // rule A: nationality == "GH" vs rule B: nationality == "TG"
+  // These MUST produce different hashes.
+  const ruleA = makeValidRule({ id: 'rule.a' });
+  ruleA.ruleIr.conditions = { kind: 'leaf', fact: 'nationality', operator: 'eq', value: 'GH' };
+  const ruleB = makeValidRule({ id: 'rule.b' });
+  ruleB.ruleIr.conditions = { kind: 'leaf', fact: 'nationality', operator: 'eq', value: 'TG' };
+  const cA = await compileRule(ruleA);
+  const cB = await compileRule(ruleB);
+  record('hash distinct — different leaf value (GH vs TG)', cA.hash !== cB.hash, `hashA=${cA.hash.slice(0, 12)}, hashB=${cB.hash.slice(0, 12)}`);
+}
+
+async function testHashDistinctDifferentNestedAnd(): Promise<void> {
+  // AND tree with different children must produce different hashes.
+  const ruleA = makeValidRule({ id: 'rule.a' });
+  ruleA.ruleIr.conditions = {
+    kind: 'and',
+    children: [
+      { kind: 'leaf', fact: 'x', operator: 'eq', value: 1 },
+      { kind: 'leaf', fact: 'y', operator: 'eq', value: 2 },
+    ],
+  };
+  const ruleB = makeValidRule({ id: 'rule.b' });
+  ruleB.ruleIr.conditions = {
+    kind: 'and',
+    children: [
+      { kind: 'leaf', fact: 'x', operator: 'eq', value: 1 },
+      { kind: 'leaf', fact: 'y', operator: 'eq', value: 3 },
+    ],
+  };
+  const cA = await compileRule(ruleA);
+  const cB = await compileRule(ruleB);
+  record('hash distinct — different nested AND children', cA.hash !== cB.hash);
+}
+
+async function testHashDistinctDifferentExceptions(): Promise<void> {
+  // Different exception trees must produce different hashes.
+  const ruleA = makeValidRule({ id: 'rule.a' });
+  ruleA.ruleIr.exceptions = [{ kind: 'leaf', fact: 'flag', operator: 'eq', value: true }];
+  const ruleB = makeValidRule({ id: 'rule.b' });
+  ruleB.ruleIr.exceptions = [{ kind: 'leaf', fact: 'flag', operator: 'eq', value: false }];
+  const cA = await compileRule(ruleA);
+  const cB = await compileRule(ruleB);
+  record('hash distinct — different exceptions', cA.hash !== cB.hash);
+}
+
+async function testHashDistinctDifferentEffectAmount(): Promise<void> {
+  // Different effect amounts must produce different hashes.
+  const ruleA = makeValidRule({ id: 'rule.a' });
+  ruleA.ruleIr.effects = [{ kind: 'FEE', code: 'FEE_001', label: 'Fee', amount: { value: 100, currency: 'USD' } }];
+  const ruleB = makeValidRule({ id: 'rule.b' });
+  ruleB.ruleIr.effects = [{ kind: 'FEE', code: 'FEE_001', label: 'Fee', amount: { value: 200, currency: 'USD' } }];
+  const cA = await compileRule(ruleA);
+  const cB = await compileRule(ruleB);
+  record('hash distinct — different effect amounts', cA.hash !== cB.hash);
+}
+
+async function testHashDistinctDifferentSource(): Promise<void> {
+  // Different sourceId must produce different hashes.
+  const ruleA = makeValidRule({ id: 'rule.a', sourceId: 'src.a' });
+  const ruleB = makeValidRule({ id: 'rule.b', sourceId: 'src.b' });
+  const cA = await compileRule(ruleA);
+  const cB = await compileRule(ruleB);
+  record('hash distinct — different sourceId', cA.hash !== cB.hash);
+}
+
+async function testHashSameForEquivalentNormalizedRules(): Promise<void> {
+  // Two rules with the SAME identity but different un-normalized structure
+  // should produce the same hash after normalization (since the hash excludes
+  // compiledAt but includes everything else).
+  // and(and(a, b), c) → and(a, b, c) → same hash as and(a, b, c)
+  const baseRule = makeValidRule({ id: 'rule.same' });
+  const ruleA: typeof baseRule = JSON.parse(JSON.stringify(baseRule));
+  const ruleB: typeof baseRule = JSON.parse(JSON.stringify(baseRule));
+  ruleA.ruleIr.conditions = {
+    kind: 'and',
+    children: [
+      { kind: 'and', children: [
+        { kind: 'leaf', fact: 'x', operator: 'eq', value: 1 },
+        { kind: 'leaf', fact: 'y', operator: 'eq', value: 2 },
+      ]},
+      { kind: 'leaf', fact: 'z', operator: 'eq', value: 3 },
+    ],
+  };
+  ruleB.ruleIr.conditions = {
+    kind: 'and',
+    children: [
+      { kind: 'leaf', fact: 'x', operator: 'eq', value: 1 },
+      { kind: 'leaf', fact: 'y', operator: 'eq', value: 2 },
+      { kind: 'leaf', fact: 'z', operator: 'eq', value: 3 },
+    ],
+  };
+  const cA = await compileRule(ruleA);
+  const cB = await compileRule(ruleB);
+  record('hash same — equivalent normalized AND trees', cA.hash === cB.hash, `hashA=${cA.hash.slice(0, 12)}, hashB=${cB.hash.slice(0, 12)}`);
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 async function main(): Promise<void> {
@@ -325,6 +429,14 @@ async function main(): Promise<void> {
   await testNormalizationPreservesSemantics();
   await testCompileRulesBatch();
   await testCompileRulesBatchFailsAtomically();
+
+  // Hash distinctness regression tests (RULE-011)
+  await testHashDistinctDifferentLeafValue();
+  await testHashDistinctDifferentNestedAnd();
+  await testHashDistinctDifferentExceptions();
+  await testHashDistinctDifferentEffectAmount();
+  await testHashDistinctDifferentSource();
+  await testHashSameForEquivalentNormalizedRules();
 
   const passed = results.filter((r) => r.passed).length;
   const failed = results.length - passed;

@@ -1268,6 +1268,78 @@ function checkRule010(): CheckResult {
 }
 
 // ===========================================================================
+// RULE-011 through RULE-015 — semantic integrity + versioning invariants
+// ===========================================================================
+
+function checkRule011(): CheckResult {
+  // RULE-011: Different semantic RuleIR must not produce the same compiled hash.
+  // The compiler must use a TRUE recursive canonical JSON serializer (not
+  // JSON.stringify with an array replacer, which strips nested properties).
+  const compilerFile = path.join(ROOT, 'src', 'kernel', 'rules', 'RuleCompiler.ts');
+  const src = readFileText(compilerFile);
+  // The old broken pattern: JSON.stringify(x, sortedKeys)
+  // The new correct pattern: a recursive canonicalJSONStringify function
+  const hasCanonicalFn = /function canonicalJSONStringify/.test(src) || /export function canonicalJSONStringify/.test(src);
+  const doesNotUseArrayReplacer = !/JSON\.stringify\([^)]+,\s*Object\.keys/.test(src);
+  return hasCanonicalFn && doesNotUseArrayReplacer
+    ? { id: 'RULE-011', name: 'hash-distinctness', passed: true }
+    : { id: 'RULE-011', name: 'hash-distinctness', passed: false, details: `canonicalFn=${hasCanonicalFn}, noArrayReplacer=${doesNotUseArrayReplacer}` };
+}
+
+function checkRule012(): CheckResult {
+  // RULE-012: Historical evaluation uses only pinned jurisdiction graph state.
+  const histFile = path.join(ROOT, 'src', 'kernel', 'rules', 'HistoricalEvaluator.ts');
+  const src = readFileText(histFile);
+  // PinnedRegistryView must build its own jurisdiction graph from pinned packages,
+  // NOT delegate to this.inner.jurisdictionGraph.
+  const buildsOwnGraph = /createJurisdictionGraph\(\)/.test(src) && /_pinnedJurisdictionGraph/.test(src);
+  const doesNotDelegate = !/return this\.inner\.jurisdictionGraph/.test(src);
+  return buildsOwnGraph && doesNotDelegate
+    ? { id: 'RULE-012', name: 'historical-pinned-jurisdiction-graph', passed: true }
+    : { id: 'RULE-012', name: 'historical-pinned-jurisdiction-graph', passed: false, details: `buildsOwn=${buildsOwnGraph}, doesNotDelegate=${doesNotDelegate}` };
+}
+
+function checkRule013(): CheckResult {
+  // RULE-013: A package cannot become active with unresolved dependencies.
+  const registryFile = path.join(ROOT, 'src', 'packages', 'VersionedPackageRegistry.ts');
+  const src = readFileText(registryFile);
+  // activatePackage must check dependencies before setting the active version.
+  const activateMatchesSrc = src.slice(src.indexOf('activatePackage('));
+  const checksMissing = /MissingDependency/.test(activateMatchesSrc);
+  const checksBeforeSet = activateMatchesSrc.indexOf('MissingDependency') < activateMatchesSrc.indexOf('this.activeVersion.set');
+  return checksMissing && checksBeforeSet
+    ? { id: 'RULE-013', name: 'activation-requires-resolved-deps', passed: true }
+    : { id: 'RULE-013', name: 'activation-requires-resolved-deps', passed: false, details: `checksMissing=${checksMissing}, checksBeforeSet=${checksBeforeSet}` };
+}
+
+function checkRule014(): CheckResult {
+  // RULE-014: Active-package replacement is atomic — the old version remains
+  // active if the new activation fails.
+  const registryFile = path.join(ROOT, 'src', 'packages', 'VersionedPackageRegistry.ts');
+  const src = readFileText(registryFile);
+  // The activatePackage method must do all dependency/cycle checks BEFORE
+  // mutating activeVersion. If any check throws, activeVersion is untouched.
+  const activateMatchesSrc = src.slice(src.indexOf('activatePackage('), src.indexOf('deactivatePackage('));
+  const firstCheckPos = activateMatchesSrc.indexOf('MissingDependency');
+  const firstSetPos = activateMatchesSrc.indexOf('this.activeVersion.set');
+  const checksBeforeMutation = firstCheckPos > -1 && firstCheckPos < firstSetPos;
+  return checksBeforeMutation
+    ? { id: 'RULE-014', name: 'activation-is-atomic', passed: true }
+    : { id: 'RULE-014', name: 'activation-is-atomic', passed: false, details: `dependency checks must precede activeVersion.set` };
+}
+
+function checkRule015(): CheckResult {
+  // RULE-015: Version selection uses semantic version precedence, not string ordering.
+  const registryFile = path.join(ROOT, 'src', 'packages', 'VersionedPackageRegistry.ts');
+  const src = readFileText(registryFile);
+  const usesSelectHighest = /selectHighestVersion/.test(src);
+  const noStringComparison = !/v\s*>\s*best/.test(src);
+  return usesSelectHighest && noStringComparison
+    ? { id: 'RULE-015', name: 'semver-precedence', passed: true }
+    : { id: 'RULE-015', name: 'semver-precedence', passed: false, details: `usesSelectHighest=${usesSelectHighest}, noStringComparison=${noStringComparison}` };
+}
+
+// ===========================================================================
 // Main runner
 // ===========================================================================
 function formatLine(id: string, name: string, passed: boolean): string {
@@ -1320,6 +1392,12 @@ function main(): void {
     checkRule008(),
     checkRule009(),
     checkRule010(),
+    // RULE-011 through RULE-015 — semantic integrity + versioning
+    checkRule011(),
+    checkRule012(),
+    checkRule013(),
+    checkRule014(),
+    checkRule015(),
   ];
 
   const headerLines = [

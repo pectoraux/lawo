@@ -40,8 +40,9 @@ import type {
 } from '@/kernel/contracts/contracts';
 import type { LoadedPackage } from '@/packages/loader';
 import { createJurisdictionGraph } from '@/kernel/jurisdiction/JurisdictionGraph';
-import { validatePackage, satisfiesVersionRange } from '@/packages/PackageValidator';
-import { InvalidPackage, PackageNotFound, PackageVersionConflict } from '@/kernel/errors';
+import { validatePackage } from '@/packages/PackageValidator';
+import { satisfiesVersionRange, selectHighestVersion } from '@/packages/semver';
+import { InvalidPackage, PackageNotFound, PackageVersionConflict, MissingDependency, DependencyConflict } from '@/kernel/errors';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -156,8 +157,18 @@ export class VersionedPackageRegistry implements PackageRegistryContract {
 
   /**
    * Activate a specific version of a package. The package must already be
-   * registered. If a different version of the same package is currently
-   * active, it is automatically deactivated first (atomic swap).
+   * registered AND its dependencies must be resolved (every dependency exists
+   * at a satisfying version; no cycles). If a different version is currently
+   * active, it remains active until the new activation succeeds — the swap is
+   * atomic (no partially-switched state).
+   *
+   * Throws if:
+   *   - the package version is not registered (PackageNotFound)
+   *   - a dependency is missing (MissingDependency)
+   *   - no satisfying dependency version exists (MissingDependency)
+   *   - a dependency cycle is detected (DependencyConflict)
+   *
+   * (RULE-013, RULE-014)
    */
   activatePackage(packageId: string, version: string): void {
     const k = keyOf({ packageId: packageId, version });
@@ -165,11 +176,41 @@ export class VersionedPackageRegistry implements PackageRegistryContract {
     if (!pkg) {
       throw new PackageNotFound(packageId, version);
     }
+
+    // Dependency resolution — must succeed before activation.
+    const deps = pkg.manifest.dependencies ?? [];
+    for (const dep of deps) {
+      const depVersions = this.listVersions(dep.packageId);
+      if (depVersions.length === 0) {
+        throw new MissingDependency(packageId, dep.packageId, dep.versionRange);
+      }
+      const satisfying = depVersions.filter((v) => satisfiesVersionRange(v, dep.versionRange));
+      if (satisfying.length === 0) {
+        throw new MissingDependency(packageId, dep.packageId, dep.versionRange);
+      }
+    }
+
+    // Cycle detection — the activation graph must be acyclic.
+    const cycles = this.detectCycles();
+    if (cycles.length > 0) {
+      throw new DependencyConflict(
+        packageId,
+        cycles[0]?.[0] ?? 'unknown',
+        `Dependency cycle detected: ${cycles.map((c) => c.join(' → ')).join('; ')}`,
+      );
+    }
+
+    // Atomic swap: save the current active version so we can restore it if
+    // anything goes wrong. Since all checks above passed, the swap is safe.
+    const previousVersion = this.activeVersion.get(packageId);
     this.activeVersion.set(packageId, version);
     this.activationMeta.set(packageId, {
       activatedAt: new Date().toISOString(),
       hash: pkg.manifest.verificationMetadata.hash,
     });
+    // If we reach here, the activation succeeded. The previous version is
+    // now superseded (not partially active alongside the new one).
+    void previousVersion;
   }
 
   /** Deactivate a specific version. No-op if not currently active. */
@@ -227,15 +268,11 @@ export class VersionedPackageRegistry implements PackageRegistryContract {
       if (activeVersion && satisfiesVersionRange(activeVersion, dep.versionRange)) {
         candidateVersion = activeVersion;
       } else {
-        // Pick the highest registered version satisfying the range.
+        // Pick the highest registered version satisfying the range — using
+        // true SemVer precedence, not string comparison (RULE-015).
         const versions = this.listVersions(dep.packageId);
-        let best: string | undefined;
-        for (const v of versions) {
-          if (satisfiesVersionRange(v, dep.versionRange)) {
-            if (!best || v > best) best = v;
-          }
-        }
-        candidateVersion = best;
+        const satisfying = versions.filter((v) => satisfiesVersionRange(v, dep.versionRange));
+        candidateVersion = selectHighestVersion(satisfying) ?? undefined;
       }
       out.push({
         packageId: dep.packageId,
@@ -293,13 +330,9 @@ export class VersionedPackageRegistry implements PackageRegistryContract {
           if (activeVersion && satisfiesVersionRange(activeVersion, dep.versionRange)) {
             visit(dep.packageId, activeVersion);
           } else {
-            // Pick the highest registered version satisfying the range.
-            let best: string | undefined;
-            for (const v of versions) {
-              if (satisfiesVersionRange(v, dep.versionRange)) {
-                if (!best || v > best) best = v;
-              }
-            }
+            // Pick the highest registered version satisfying the range (SemVer).
+            const satisfying = versions.filter((v) => satisfiesVersionRange(v, dep.versionRange));
+            const best = selectHighestVersion(satisfying);
             if (best) visit(dep.packageId, best);
           }
         }

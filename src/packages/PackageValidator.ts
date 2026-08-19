@@ -38,6 +38,7 @@ import type {
 import type { LoadedPackage } from '@/packages/loader';
 import type { PackageRegistry } from '@/kernel/contracts/contracts';
 import { validateRule } from '@/kernel/rules/RuleIRValidator';
+import { isValidSemver, satisfiesVersionRange } from '@/packages/semver';
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -56,118 +57,6 @@ const ALLOWED_CATEGORIES: ReadonlySet<PackageCategory> = new Set<PackageCategory
   'SITUATION',
   'CAPABILITY',
 ]);
-
-// ---------------------------------------------------------------------------
-// Semver-ish validation (deliberately loose — we accept anything that looks
-// like MAJOR.MINOR.PATCH with optional -prerelease +build metadata)
-// ---------------------------------------------------------------------------
-const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-
-/**
- * Compare a `versionRange` against a concrete `version`. The range format is
- * deliberately a subset of npm's:
- *   - `^1.2.3`  — compatible-with: same major, >= 1.2.3 and < 2.0.0
- *   - `~1.2.3`  — patch-only: same major+minor, >= 1.2.3 and < 1.3.0
- *   - `1.2.3`   — exact match
- *   - `>=1.2.3` — greater-than-or-equal
- *   - `>1.2.3`  — greater-than
- *   - `<=1.2.3` — less-than-or-equal
- *   - `<1.2.3`  — less-than
- *   - `*`       — any version
- *
- * Returns true if `version` satisfies `range`. Returns false if the range
- * is malformed or the version does not satisfy.
- */
-export function satisfiesVersionRange(version: string, range: string): boolean {
-  if (typeof version !== 'string' || typeof range !== 'string') return false;
-  if (range.trim() === '*' || range.trim() === '') return true;
-
-  // Strip whitespace.
-  const r = range.trim();
-
-  // ^ compatible-with
-  if (r.startsWith('^')) {
-    const base = r.slice(1).trim();
-    const parsed = parseSemver(base);
-    if (!parsed) return false;
-    const v = parseSemver(version);
-    if (!v) return false;
-    if (v.major !== parsed.major) return false;
-    if (compareSemver(v, parsed) < 0) return false;
-    return true;
-  }
-
-  // ~ patch-only
-  if (r.startsWith('~')) {
-    const base = r.slice(1).trim();
-    const parsed = parseSemver(base);
-    if (!parsed) return false;
-    const v = parseSemver(version);
-    if (!v) return false;
-    if (v.major !== parsed.major || v.minor !== parsed.minor) return false;
-    if (compareSemver(v, parsed) < 0) return false;
-    return true;
-  }
-
-  // >= > <= <
-  const m = r.match(/^(>=|>|<=|<)\s*(.+)$/);
-  if (m) {
-    const op = m[1]!;
-    const base = m[2]!.trim();
-    const parsed = parseSemver(base);
-    if (!parsed) return false;
-    const v = parseSemver(version);
-    if (!v) return false;
-    const cmp = compareSemver(v, parsed);
-    switch (op) {
-      case '>=': return cmp >= 0;
-      case '>': return cmp > 0;
-      case '<=': return cmp <= 0;
-      case '<': return cmp < 0;
-      default: return false;
-    }
-  }
-
-  // Exact match
-  const parsed = parseSemver(r);
-  if (!parsed) return false;
-  const v = parseSemver(version);
-  if (!v) return false;
-  return compareSemver(v, parsed) === 0;
-}
-
-interface ParsedSemver {
-  major: number;
-  minor: number;
-  patch: number;
-  prerelease: string | null;
-  build: string | null;
-}
-
-function parseSemver(v: string): ParsedSemver | null {
-  const m = v.match(SEMVER_RE);
-  if (!m) return null;
-  return {
-    major: parseInt(m[1]!, 10),
-    minor: parseInt(m[2]!, 10),
-    patch: parseInt(m[3]!, 10),
-    prerelease: m[4] ? m[4].slice(1) : null,
-    build: m[5] ? m[5].slice(1) : null,
-  };
-}
-
-function compareSemver(a: ParsedSemver, b: ParsedSemver): number {
-  if (a.major !== b.major) return a.major > b.major ? 1 : -1;
-  if (a.minor !== b.minor) return a.minor > b.minor ? 1 : -1;
-  if (a.patch !== b.patch) return a.patch > b.patch ? 1 : -1;
-  // A version WITHOUT prerelease > a version WITH prerelease.
-  if (a.prerelease && !b.prerelease) return -1;
-  if (!a.prerelease && b.prerelease) return 1;
-  if (a.prerelease && b.prerelease) {
-    return a.prerelease < b.prerelease ? -1 : a.prerelease > b.prerelease ? 1 : 0;
-  }
-  return 0;
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -204,7 +93,7 @@ export function validatePackage(
   }
   if (!isNonEmptyString(manifest.version)) {
     errors.push('manifest.version must be a non-empty string');
-  } else if (!SEMVER_RE.test(manifest.version)) {
+  } else if (!isValidSemver(manifest.version)) {
     errors.push(
       `manifest.version (${manifest.version}) is not a valid semver string (expected MAJOR.MINOR.PATCH)`,
     );

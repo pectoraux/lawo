@@ -143,7 +143,8 @@ function normalizeConditionNode(node: ConditionNode): ConditionNode {
 }
 
 /**
- * Flatten nested same-kind nodes and deduplicate children by JSON representation.
+ * Flatten nested same-kind nodes and deduplicate children by CANONICAL JSON
+ * representation (not raw JSON.stringify — that doesn't sort nested keys).
  */
 function flattenAndDedup(kind: 'and' | 'or', children: ConditionNode[]): ConditionNode[] {
   const flattened: ConditionNode[] = [];
@@ -153,7 +154,8 @@ function flattenAndDedup(kind: 'and' | 'or', children: ConditionNode[]): Conditi
     if (node.kind === kind) {
       for (const child of node.children) visit(child);
     } else {
-      const key = JSON.stringify(node);
+      // Use canonical JSON so key ordering doesn't affect dedup.
+      const key = canonicalJSONStringify(node);
       if (!seen.has(key)) {
         seen.add(key);
         flattened.push(node);
@@ -169,32 +171,89 @@ function flattenAndDedup(kind: 'and' | 'or', children: ConditionNode[]): Conditi
  * Compute a SHA-256 hash of the canonical JSON representation of a CompiledRule
  * (excluding the hash field itself). The hash is deterministic — same input
  * always produces the same hash. This makes the compiled rule immutable and
- * tamper-evident (RULE-010).
+ * tamper-evident (RULE-010, RULE-011).
  *
  * Note: `compiledAt` is excluded from the hash computation because it's an
  * informational timestamp that would make the hash non-deterministic.
+ *
+ * CANONICAL SERIALIZATION:
+ *   The previous implementation used `JSON.stringify(obj, sortedKeys)` with
+ *   an array replacer. That is INCORRECT — JSON.stringify's array replacer
+ *   acts as a property whitelist at EVERY nesting depth, filtering out any
+ *   property not in the list. This means materially different nested condition
+ *   trees could produce the same hash (the nested properties were stripped).
+ *
+ *   This implementation uses a true recursive canonical serializer:
+ *   - object keys sorted lexicographically at every depth
+ *   - arrays preserve semantic order
+ *   - primitives serialized canonically
+ *   - undefined values are rejected (throw) — they indicate a bug
+ *   - no mutation of original objects
  */
 function computeHash(compiled: Omit<CompiledRule, 'hash'>): string {
-  // Create a canonical representation excluding compiledAt (informational)
-  // and the hash field (which doesn't exist yet on this object).
   const canonical = {
-    id: compiled.id,
+    authorityId: compiled.authorityId,
     code: compiled.code,
-    title: compiled.title,
-    packageId: compiled.packageId,
-    ruleVersion: compiled.ruleVersion,
     compiledConditions: compiled.compiledConditions,
     compiledExceptions: compiled.compiledExceptions,
     effects: compiled.effects,
+    id: compiled.id,
     jurisdictionId: compiled.jurisdictionId,
-    authorityId: compiled.authorityId,
+    packageId: compiled.packageId,
+    ruleVersion: compiled.ruleVersion,
     sourceId: compiled.sourceId,
-    type: compiled.type,
-    truthLevel: compiled.truthLevel,
-    temporal: compiled.temporal,
     sourceRuleIrId: compiled.sourceRuleIrId,
+    temporal: compiled.temporal,
+    title: compiled.title,
+    truthLevel: compiled.truthLevel,
+    type: compiled.type,
   };
 
-  const json = JSON.stringify(canonical, Object.keys(canonical).sort());
-  return createHash('sha256').update(json).digest('hex');
+  const json = canonicalJSONStringify(canonical);
+  return createHash('sha256').update(json, 'utf8').digest('hex');
+}
+
+/**
+ * Recursively serialize a value into canonical JSON (exported for tests + shared use).
+ * - Object keys are sorted lexicographically at EVERY depth.
+ * - Arrays preserve element order (semantic order matters for conditions/effects).
+ * - Primitives (string, number, boolean, null) are serialized via JSON.stringify.
+ * - `undefined` is rejected — it indicates a missing field that should have
+ *   been caught by the validator. Throwing here is a fail-closed safety check.
+ * - Functions and symbols are rejected — they have no canonical form.
+ * - The original object is NOT mutated.
+ */
+export function canonicalJSONStringify(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) {
+    throw new CompilationError('canonicalJSONStringify: encountered undefined — field missing or not populated');
+  }
+  const t = typeof value;
+  if (t === 'string') return JSON.stringify(value);
+  if (t === 'number') {
+    if (!Number.isFinite(value)) throw new CompilationError(`canonicalJSONStringify: non-finite number ${value}`);
+    return String(value);
+  }
+  if (t === 'boolean') return value ? 'true' : 'false';
+  if (t === 'function' || t === 'symbol' || t === 'bigint') {
+    throw new CompilationError(`canonicalJSONStringify: unsupported type ${t}`);
+  }
+
+  if (Array.isArray(value)) {
+    // Arrays preserve order — do NOT sort.
+    const parts = value.map((el) => canonicalJSONStringify(el));
+    return `[${parts.join(',')}]`;
+  }
+
+  // Object — sort keys lexicographically at this depth, then recurse.
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  const parts = keys.map((k) => {
+    const v = obj[k];
+    if (v === undefined) return null; // skip undefined properties
+    return `${JSON.stringify(k)}:${canonicalJSONStringify(v)}`;
+  });
+  // Filter out nulls (undefined properties that were skipped).
+  const filtered = parts.filter((p) => p !== null);
+  return `{${filtered.join(',')}}`;
 }

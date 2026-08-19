@@ -15,7 +15,8 @@ import type {
   Source,
 } from '@/kernel/primitives/types';
 import type { LoadedPackage } from '@/packages/loader';
-import { validatePackage, satisfiesVersionRange } from '@/packages/PackageValidator';
+import { validatePackage } from '@/packages/PackageValidator';
+import { satisfiesVersionRange } from '@/packages/semver';
 
 interface TestResult {
   name: string;

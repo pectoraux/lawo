@@ -28,12 +28,13 @@ import type {
   StateSnapshot,
   AuditEvent,
 } from '@/kernel/primitives/types';
-import type { PackageRegistry } from '@/kernel/contracts/contracts';
+import type { PackageRegistry, JurisdictionGraph } from '@/kernel/contracts/contracts';
 import type { VersionedPackageRegistry } from '@/packages/VersionedPackageRegistry';
 import { createContextBuilder } from '@/intelligence/context/ContextBuilder';
 import { createRuleEngine } from '@/kernel/rules/RuleEngine';
 import { createStateEngine } from '@/kernel/state/StateEngine';
 import { createProvenanceBuilder } from '@/kernel/provenance/ProvenanceBuilder';
+import { createJurisdictionGraph } from '@/kernel/jurisdiction/JurisdictionGraph';
 import { HistoricalResolutionError } from '@/kernel/errors';
 
 /**
@@ -152,13 +153,26 @@ export function evaluateHistorically(
 // ---------------------------------------------------------------------------
 
 class PinnedRegistryView implements PackageRegistry {
+  private readonly _pinnedJurisdictionGraph: JurisdictionGraph;
+
   constructor(
     private readonly inner: VersionedPackageRegistry,
     private readonly pinned: import('@/packages/loader').LoadedPackage[],
-  ) {}
+  ) {
+    // Build a jurisdiction graph from ONLY the pinned packages — not the
+    // registry-wide graph (which contains jurisdictions from ALL registered
+    // versions). This ensures historical evaluation sees only the
+    // jurisdiction state that existed at the pinned versions (RULE-012).
+    const graph = createJurisdictionGraph();
+    for (const pkg of pinned) {
+      for (const j of pkg.jurisdictions) graph.add(j);
+      for (const e of pkg.jurisdictionEdges) graph.addEdge(e);
+    }
+    this._pinnedJurisdictionGraph = graph;
+  }
 
   get jurisdictionGraph() {
-    return this.inner.jurisdictionGraph;
+    return this._pinnedJurisdictionGraph;
   }
 
   listPackages(category?: PackageManifest['category']): PackageManifest[] {

@@ -285,7 +285,7 @@ function testMultiplePinnedPackages(): void {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
-function main(): void {
+async function main(): Promise<void> {
   console.log('Nomos — Historical Reproducibility Tests');
   console.log('==========================================');
   console.log();
@@ -295,6 +295,7 @@ function main(): void {
   testProvenanceCarriesExactPackageVersion();
   testHistoricalIgnoresActiveVersion();
   testMultiplePinnedPackages();
+  await testGoldenHistoricalStability();
 
   const passed = results.filter((r) => r.passed).length;
   const failed = results.length - passed;
@@ -305,4 +306,131 @@ function main(): void {
   process.exit(0);
 }
 
-main();
+void main();
+
+// ---------------------------------------------------------------------------
+// Golden historical fixture: v1 result stable after v2 registered + activated
+// (I13 / RULE-009 regression test)
+// ---------------------------------------------------------------------------
+
+async function testGoldenHistoricalStability(): Promise<void> {
+  const registry = createVersionedPackageRegistry();
+
+  // VERSION 1: a simple test package with one jurisdiction + one rule.
+  const jur1 = {
+    id: 'jur.test.golden',
+    code: 'TEST_GOLDEN',
+    name: 'Test Golden Jurisdiction',
+    kind: 'COUNTRY' as const,
+    parentIds: [],
+    temporal: { validFrom: '2020-01-01', validTo: null, version: 1, supersedes: null, supersededBy: null },
+  };
+  const rule1 = makeTestRule('rule.golden.v1', 'jur.test.golden', 'pkg.golden', 'RIGHT_GOLDEN_V1', 'Right Golden V1');
+  const pkg1 = makeTestPackage('pkg.golden', '1.0.0', [rule1], [jur1], []);
+  registry.registerPackage(pkg1);
+  registry.activatePackage('pkg.golden', '1.0.0');
+
+  // Evaluate with v1 pinned.
+  const facts = [
+    { id: 'f1', subjectId: 'subj_golden', attribute: 'value', value: 42, truthLevel: 'T0' as const, observedAt: '2025-01-15', tenantId: null },
+  ];
+  const request = {
+    subjectId: 'subj_golden',
+    asOf: '2025-06-01',
+    situationId: undefined,
+    facts,
+    jurisdictionIds: ['jur.test.golden'],
+    objective: undefined,
+    tenantId: null as string | null,
+  };
+
+  const result1 = evaluateHistorically(request, registry, [
+    { packageId: 'pkg.golden', version: '1.0.0' },
+  ]);
+
+  const firedCount1 = result1.state.firedEffects.length;
+
+  // VERSION 2: same packageId, different version — new rule + new jurisdiction edge.
+  const jur2 = {
+    ...jur1,
+    temporal: { ...jur1.temporal, version: 2 },
+  };
+  const rule2 = makeTestRule('rule.golden.v2', 'jur.test.golden', 'pkg.golden', 'RIGHT_GOLDEN_V2', 'Right Golden V2');
+  const pkg2 = makeTestPackage('pkg.golden', '2.0.0', [rule2], [jur2], []);
+  registry.registerPackage(pkg2);
+  registry.activatePackage('pkg.golden', '2.0.0');
+
+  // Evaluate with v1 STILL pinned — result must be identical to the first evaluation.
+  const result2 = evaluateHistorically(request, registry, [
+    { packageId: 'pkg.golden', version: '1.0.0' },
+  ]);
+
+  const firedCount2 = result2.state.firedEffects.length;
+
+  // The v1 evaluation must produce the SAME result after v2 was registered + activated.
+  // This proves historical reproducibility (I13 / RULE-009).
+  const sameFiredCount = firedCount1 === firedCount2;
+  const sameEffectCodes = JSON.stringify(result1.state.firedEffects.map((e: { effect: { code: string } }) => e.effect.code).sort())
+    === JSON.stringify(result2.state.firedEffects.map((e: { effect: { code: string } }) => e.effect.code).sort());
+
+  record('golden historical — v1 result stable after v2 registered + activated',
+    sameFiredCount && sameEffectCodes,
+    `v1 firedCount=${firedCount1}, v2-pinned-as-v1 firedCount=${firedCount2}, sameCodes=${sameEffectCodes}`);
+}
+
+// Helper: create a simple test rule that fires when value > 10.
+function makeTestRule(ruleId: string, jurisdictionId: string, packageId: string, effectCode: string, effectLabel: string): import('@/kernel/primitives/types').Rule {
+  return {
+    id: ruleId,
+    code: ruleId.toUpperCase(),
+    title: `Test Rule ${ruleId}`,
+    jurisdictionId,
+    authorityId: 'auth.test',
+    sourceId: 'src.test',
+    type: 'DETERMINISTIC' as const,
+    packageId,
+    truthLevel: 'T0' as const,
+    temporal: { validFrom: '2020-01-01', validTo: null, version: 1, supersedes: null, supersededBy: null },
+    ruleIr: {
+      id: `ruleir.${ruleId}`,
+      ruleId,
+      conditions: { kind: 'leaf', fact: 'value', operator: 'gt', value: 10 },
+      exceptions: [],
+      effects: [{ kind: 'RIGHT', code: effectCode, label: effectLabel }],
+    },
+  };
+}
+
+// Helper: create a simple test package.
+function makeTestPackage(packageId: string, version: string, rules: import('@/kernel/primitives/types').Rule[], jurisdictions: import('@/kernel/primitives/types').Jurisdiction[], edges: import('@/kernel/primitives/types').JurisdictionEdge[]): import('@/packages/loader').LoadedPackage {
+  return {
+    manifest: {
+      packageId,
+      name: `Test Package ${version}`,
+      version,
+      category: 'JURISDICTION' as const,
+      dependencies: [],
+      supportedJurisdictions: jurisdictions.map((j) => j.id),
+      domains: [],
+      situations: [],
+      capabilities: [],
+      sources: ['src.test'],
+      rules: rules.map((r) => r.id),
+      procedures: [],
+      actions: [],
+      schemas: [],
+      testFixtures: [],
+      verificationMetadata: { signedBy: 'test', signedAt: '2020-01-01', hash: `hash-${version}` },
+      description: `Test package ${version}`,
+    },
+    jurisdictions,
+    jurisdictionEdges: edges,
+    authorities: [{ id: 'auth.test', name: 'Test Authority', jurisdictionId: jurisdictions[0]?.id ?? 'jur.test', kind: 'OTHER' as const }],
+    sources: [{ id: 'src.test', title: 'Test Source', citation: 'Test Citation', authorityId: 'auth.test' }],
+    rules,
+    situations: [],
+    procedures: [],
+    actions: [],
+    evidence: [],
+  };
+}

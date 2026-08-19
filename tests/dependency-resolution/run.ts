@@ -232,10 +232,15 @@ function testDetectCyclesInCyclicGraph(): void {
   // pkg.a depends on pkg.b, pkg.b depends on pkg.a — a 2-cycle.
   r.registerPackage(makePackage(makeManifest('pkg.a', '1.0.0', [{ packageId: 'pkg.b', versionRange: '^1.0.0' }])));
   r.registerPackage(makePackage(makeManifest('pkg.b', '1.0.0', [{ packageId: 'pkg.a', versionRange: '^1.0.0' }])));
-  r.activatePackage('pkg.a', '1.0.0');
-  r.activatePackage('pkg.b', '1.0.0');
+  // Activation must fail — the cycle is detected (RULE-013).
+  let activateThrew = false;
+  try {
+    r.activatePackage('pkg.a', '1.0.0');
+  } catch {
+    activateThrew = true;
+  }
   const cycles = r.detectCycles();
-  record('detectCycles — returns a cycle for cyclic graph', cycles.length > 0, `cycles=${JSON.stringify(cycles)}`);
+  record('detectCycles — returns a cycle for cyclic graph', cycles.length > 0 && activateThrew, `cycles=${JSON.stringify(cycles)}, activateThrew=${activateThrew}`);
 }
 
 function testGetRulesAtVersion(): void {
