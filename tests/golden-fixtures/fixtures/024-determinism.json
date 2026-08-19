@@ -1,0 +1,102 @@
+{
+  "id": "fixture-024",
+  "description": "Determinism — same facts + same rule MUST produce identical results across runs (the framework runs every fixture twice)",
+  "rule": {
+    "id": "rule.test.024",
+    "code": "TEST-024",
+    "title": "Test rule 024 — determinism anchor (nested AND with NOT)",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.024",
+      "ruleId": "rule.test.024",
+      "conditions": {
+        "kind": "and",
+        "children": [
+          {
+            "kind": "not",
+            "child": {
+              "kind": "leaf",
+              "fact": "test.blocked",
+              "operator": "eq",
+              "value": true
+            }
+          },
+          {
+            "kind": "or",
+            "children": [
+              {
+                "kind": "leaf",
+                "fact": "test.priority",
+                "operator": "gte",
+                "value": 5
+              },
+              {
+                "kind": "leaf",
+                "fact": "test.vip",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "RIGHT",
+          "code": "RIGHT_TEST_024",
+          "label": "Right for test 024"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.024.blocked",
+      "subjectId": "subj.test",
+      "attribute": "test.blocked",
+      "value": false,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    },
+    {
+      "id": "fact.test.024.priority",
+      "subjectId": "subj.test",
+      "attribute": "test.priority",
+      "value": 2,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    },
+    {
+      "id": "fact.test.024.vip",
+      "subjectId": "subj.test",
+      "attribute": "test.vip",
+      "value": true,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

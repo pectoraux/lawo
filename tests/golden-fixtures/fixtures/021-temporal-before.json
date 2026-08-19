@@ -1,0 +1,59 @@
+{
+  "id": "fixture-021",
+  "description": "Temporal boundary — asOf before validFrom (rule does not fire)",
+  "rule": {
+    "id": "rule.test.021",
+    "code": "TEST-021",
+    "title": "Test rule 021 — temporal before validFrom",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.021",
+      "ruleId": "rule.test.021",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.flag",
+        "operator": "eq",
+        "value": true
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "RIGHT",
+          "code": "RIGHT_TEST_021",
+          "label": "Right for test 021"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2025-06-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.021.flag",
+      "subjectId": "subj.test",
+      "attribute": "test.flag",
+      "value": true,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": false,
+    "skippedDueToException": false,
+    "firedEffectCount": 0,
+    "truthLevel": "T0",
+    "calculationSteps": 1
+  }
+}

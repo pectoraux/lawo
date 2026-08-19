@@ -1,0 +1,74 @@
+{
+  "id": "fixture-023",
+  "description": "Multiple effects — rule fires 3 effects",
+  "rule": {
+    "id": "rule.test.023",
+    "code": "TEST-023",
+    "title": "Test rule 023 — three effects",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.023",
+      "ruleId": "rule.test.023",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.flag",
+        "operator": "eq",
+        "value": true
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "RIGHT",
+          "code": "RIGHT_TEST_023_A",
+          "label": "Right A for test 023"
+        },
+        {
+          "kind": "OBLIGATION",
+          "code": "OBLIGATION_TEST_023_B",
+          "label": "Obligation B for test 023",
+          "amount": {
+            "value": 25.00,
+            "currency": "USD",
+            "basis": "flat"
+          }
+        },
+        {
+          "kind": "PERMISSION",
+          "code": "PERMISSION_TEST_023_C",
+          "label": "Permission C for test 023"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.023.flag",
+      "subjectId": "subj.test",
+      "attribute": "test.flag",
+      "value": true,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 3,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

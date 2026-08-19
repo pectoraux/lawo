@@ -30,102 +30,166 @@ import type {
   RuleEvaluationResult,
   TruthLevel,
 } from '@/kernel/primitives/types';
-import type { RuleEngine } from '@/kernel/contracts/contracts';
+import type { CompiledRuleEngine } from '@/kernel/contracts/contracts';
+import type { CompiledRule } from '@/kernel/rules/CompiledRule';
 import { covers } from '@/kernel/time/TemporalModel';
 import { evaluateCondition } from '@/kernel/rules/conditionEval';
 
-class DeterministicRuleEngine implements RuleEngine {
-  evaluate(rule: Rule, facts: Fact[], asOf: string): RuleEvaluationResult {
-    const calculation: CalculationStep[] = [];
+/**
+ * Internal: evaluate a condition tree + exception list + effect list against
+ * facts at asOf. Both `Rule` and `CompiledRule` reduce to this same core
+ * algorithm because CompiledRule's normalised tree has identical semantics.
+ *
+ * This is shared by `evaluate` (Rule) and `evaluateCompiled` (CompiledRule)
+ * so the algorithm is provably identical between the two paths.
+ */
+function evaluateCore(
+  ruleId: string,
+  truthLevel: TruthLevel,
+  temporal: CompiledRule['temporal'],
+  conditions: import('@/kernel/primitives/types').ConditionNode,
+  exceptions: import('@/kernel/primitives/types').ConditionNode[],
+  effects: RuleEffect[],
+  facts: Fact[],
+  asOf: string,
+): RuleEvaluationResult {
+  const calculation: CalculationStep[] = [];
 
-    // ---- Step 1: temporal coverage (I7) ----
-    const temporalOk = covers(rule.temporal, asOf);
-    calculation.push({
-      description: 'Temporal coverage check',
-      input: { validFrom: rule.temporal.validFrom, validTo: rule.temporal.validTo ?? null, asOf },
-      output: temporalOk,
-      ruleClause: 'temporal',
-    });
+  // ---- Step 1: temporal coverage (I7) ----
+  const temporalOk = covers(temporal, asOf);
+  calculation.push({
+    description: 'Temporal coverage check',
+    input: { validFrom: temporal.validFrom, validTo: temporal.validTo ?? null, asOf },
+    output: temporalOk,
+    ruleClause: 'temporal',
+  });
 
-    if (!temporalOk) {
-      return {
-        ruleId: rule.id,
-        matched: false,
-        skippedDueToException: false,
-        firedEffects: [],
-        truthLevel: rule.truthLevel,
-        calculation,
-      };
-    }
-
-    // ---- Step 2: conditions ----
-    const conditionsMatch = evaluateCondition(rule.ruleIr.conditions, facts);
-    calculation.push({
-      description: 'Condition tree evaluation',
-      input: { conditions: rule.ruleIr.conditions, factCount: facts.length },
-      output: conditionsMatch,
-      ruleClause: 'conditions',
-    });
-
-    // ---- Step 3: exceptions ----
-    const exceptions = rule.ruleIr.exceptions ?? [];
-    let exceptionMatched = false;
-    let firstMatchingExceptionIndex = -1;
-    for (let i = 0; i < exceptions.length; i++) {
-      const ex = exceptions[i]!;
-      const matched = evaluateCondition(ex, facts);
-      calculation.push({
-        description: `Exception[${i}] evaluation`,
-        input: { exception: ex },
-        output: matched,
-        ruleClause: `exception[${i}]`,
-      });
-      if (matched && !exceptionMatched) {
-        exceptionMatched = true;
-        firstMatchingExceptionIndex = i;
-      }
-    }
-
-    // ---- Step 4: outcome ----
-    const matched = conditionsMatch && !exceptionMatched;
-    let firedEffects: RuleEffect[] = [];
-    if (matched) {
-      // Materialise effects from the RuleIR.
-      firedEffects = rule.ruleIr.effects.map((e) => ({ ...e }));
-    }
-
-    const outcomeDescription = !conditionsMatch
-      ? 'Conditions not satisfied — rule does not fire'
-      : exceptionMatched
-        ? `Rule skipped due to exception[${firstMatchingExceptionIndex}]`
-        : 'Conditions satisfied and no exception matched — rule fires';
-
-    calculation.push({
-      description: outcomeDescription,
-      input: { conditionsMatch, exceptionMatched },
-      output: matched,
-      ruleClause: 'outcome',
-    });
-
+  if (!temporalOk) {
     return {
-      ruleId: rule.id,
-      matched,
-      skippedDueToException: exceptionMatched,
-      firedEffects,
-      truthLevel: rule.truthLevel,
+      ruleId,
+      matched: false,
+      skippedDueToException: false,
+      firedEffects: [],
+      truthLevel,
       calculation,
     };
+  }
+
+  // ---- Step 2: conditions ----
+  const conditionsMatch = evaluateCondition(conditions, facts);
+  calculation.push({
+    description: 'Condition tree evaluation',
+    input: { conditions, factCount: facts.length },
+    output: conditionsMatch,
+    ruleClause: 'conditions',
+  });
+
+  // ---- Step 3: exceptions ----
+  let exceptionMatched = false;
+  let firstMatchingExceptionIndex = -1;
+  for (let i = 0; i < exceptions.length; i++) {
+    const ex = exceptions[i]!;
+    const matched = evaluateCondition(ex, facts);
+    calculation.push({
+      description: `Exception[${i}] evaluation`,
+      input: { exception: ex },
+      output: matched,
+      ruleClause: `exception[${i}]`,
+    });
+    if (matched && !exceptionMatched) {
+      exceptionMatched = true;
+      firstMatchingExceptionIndex = i;
+    }
+  }
+
+  // ---- Step 4: outcome ----
+  const matched = conditionsMatch && !exceptionMatched;
+  let firedEffects: RuleEffect[] = [];
+  if (matched) {
+    // Materialise effects (deep clone to prevent caller mutation).
+    firedEffects = effects.map((e) => ({ ...e, amount: e.amount ? { ...e.amount } : undefined }));
+  }
+
+  const outcomeDescription = !conditionsMatch
+    ? 'Conditions not satisfied — rule does not fire'
+    : exceptionMatched
+      ? `Rule skipped due to exception[${firstMatchingExceptionIndex}]`
+      : 'Conditions satisfied and no exception matched — rule fires';
+
+  calculation.push({
+    description: outcomeDescription,
+    input: { conditionsMatch, exceptionMatched },
+    output: matched,
+    ruleClause: 'outcome',
+  });
+
+  return {
+    ruleId,
+    matched,
+    skippedDueToException: exceptionMatched,
+    firedEffects,
+    truthLevel,
+    calculation,
+  };
+}
+
+class DeterministicRuleEngine implements CompiledRuleEngine {
+  evaluate(rule: Rule, facts: Fact[], asOf: string): RuleEvaluationResult {
+    return evaluateCore(
+      rule.id,
+      rule.truthLevel,
+      rule.temporal,
+      rule.ruleIr.conditions,
+      rule.ruleIr.exceptions ?? [],
+      rule.ruleIr.effects,
+      facts,
+      asOf,
+    );
   }
 
   evaluateAll(rules: Rule[], facts: Fact[], asOf: string): RuleEvaluationResult[] {
     return rules.map((rule) => this.evaluate(rule, facts, asOf));
   }
+
+  /**
+   * Evaluate a `CompiledRule` — the pre-validated, normalised, hashed runtime
+   * representation produced by `compileRule`. The evaluation algorithm is
+   * IDENTICAL to `evaluate` — the compiled rule's condition tree has the same
+   * semantics (it is normalised but not transformed). The benefit is that
+   * compiled rules can be cached, hashed, and trusted without re-validating
+   * on every call (per RULE-010, I5, I13).
+   */
+  evaluateCompiled(rule: CompiledRule, facts: Fact[], asOf: string): RuleEvaluationResult {
+    return evaluateCore(
+      rule.id,
+      rule.truthLevel,
+      rule.temporal,
+      rule.compiledConditions,
+      rule.compiledExceptions,
+      rule.effects,
+      facts,
+      asOf,
+    );
+  }
+
+  evaluateAllCompiled(
+    rules: CompiledRule[],
+    facts: Fact[],
+    asOf: string,
+  ): RuleEvaluationResult[] {
+    return rules.map((rule) => this.evaluateCompiled(rule, facts, asOf));
+  }
 }
 
 /**
- * Factory — produces a fresh, deterministic RuleEngine.
+ * Factory — produces a fresh, deterministic RuleEngine that ALSO implements
+ * the CompiledRuleEngine contract (i.e. accepts CompiledRule inputs).
+ *
+ * Callers that only need the FROZEN `RuleEngine` contract can assign the
+ * result to `RuleEngine`; callers that need `evaluateCompiled` assign it to
+ * `CompiledRuleEngine`.
  */
-export function createRuleEngine(): RuleEngine {
+export function createRuleEngine(): CompiledRuleEngine {
   return new DeterministicRuleEngine();
 }
 

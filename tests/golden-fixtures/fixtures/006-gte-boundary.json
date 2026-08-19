@@ -1,0 +1,59 @@
+{
+  "id": "fixture-006",
+  "description": "Numeric greater-equal (gte) — boundary match (value === threshold)",
+  "rule": {
+    "id": "rule.test.006",
+    "code": "TEST-006",
+    "title": "Test rule 006 — gte boundary match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.006",
+      "ruleId": "rule.test.006",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.score",
+        "operator": "gte",
+        "value": 60
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "PERMISSION",
+          "code": "PERMISSION_TEST_006",
+          "label": "Permission for test 006"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.006.score",
+      "subjectId": "subj.test",
+      "attribute": "test.score",
+      "value": 60,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "id": "fixture-005",
+  "description": "Numeric greater-than (gt) — fact value below threshold (no match)",
+  "rule": {
+    "id": "rule.test.005",
+    "code": "TEST-005",
+    "title": "Test rule 005 — gt no match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.005",
+      "ruleId": "rule.test.005",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.count",
+        "operator": "gt",
+        "value": 100
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "OBLIGATION",
+          "code": "OBLIGATION_TEST_005",
+          "label": "Obligation for test 005"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.005.count",
+      "subjectId": "subj.test",
+      "attribute": "test.count",
+      "value": 50,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": false,
+    "skippedDueToException": false,
+    "firedEffectCount": 0,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

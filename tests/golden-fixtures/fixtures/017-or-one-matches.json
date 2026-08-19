@@ -1,0 +1,70 @@
+{
+  "id": "fixture-017",
+  "description": "Nested OR — one child matches (rule fires)",
+  "rule": {
+    "id": "rule.test.017",
+    "code": "TEST-017",
+    "title": "Test rule 017 — nested OR one matches",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.017",
+      "ruleId": "rule.test.017",
+      "conditions": {
+        "kind": "or",
+        "children": [
+          {
+            "kind": "leaf",
+            "fact": "test.color",
+            "operator": "eq",
+            "value": "red"
+          },
+          {
+            "kind": "leaf",
+            "fact": "test.color",
+            "operator": "eq",
+            "value": "blue"
+          }
+        ]
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "PERMISSION",
+          "code": "PERMISSION_TEST_017",
+          "label": "Permission for test 017"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.017.color",
+      "subjectId": "subj.test",
+      "attribute": "test.color",
+      "value": "blue",
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

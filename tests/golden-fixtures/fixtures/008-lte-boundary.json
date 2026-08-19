@@ -1,0 +1,59 @@
+{
+  "id": "fixture-008",
+  "description": "Numeric less-equal (lte) — boundary match (value === threshold)",
+  "rule": {
+    "id": "rule.test.008",
+    "code": "TEST-008",
+    "title": "Test rule 008 — lte boundary match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.008",
+      "ruleId": "rule.test.008",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.weight",
+        "operator": "lte",
+        "value": 50
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "OPTION",
+          "code": "OPTION_TEST_008",
+          "label": "Option for test 008"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.008.weight",
+      "subjectId": "subj.test",
+      "attribute": "test.weight",
+      "value": 50,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

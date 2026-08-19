@@ -1,0 +1,59 @@
+{
+  "id": "fixture-003",
+  "description": "Inequality (neq) — fact value differs from condition value",
+  "rule": {
+    "id": "rule.test.003",
+    "code": "TEST-003",
+    "title": "Test rule 003 — simple neq match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.003",
+      "ruleId": "rule.test.003",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.color",
+        "operator": "neq",
+        "value": "red"
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "RESTRICTION",
+          "code": "RESTRICTION_TEST_003",
+          "label": "Restriction for test 003"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.003.color",
+      "subjectId": "subj.test",
+      "attribute": "test.color",
+      "value": "blue",
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

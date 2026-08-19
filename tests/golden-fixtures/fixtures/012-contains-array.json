@@ -1,0 +1,59 @@
+{
+  "id": "fixture-012",
+  "description": "Contains (array) — fact array contains the condition value",
+  "rule": {
+    "id": "rule.test.012",
+    "code": "TEST-012",
+    "title": "Test rule 012 — contains array match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.012",
+      "ruleId": "rule.test.012",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.tags",
+        "operator": "contains",
+        "value": "vip"
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "RIGHT",
+          "code": "RIGHT_TEST_012",
+          "label": "Right for test 012"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.012.tags",
+      "subjectId": "subj.test",
+      "attribute": "test.tags",
+      "value": ["premium", "vip", "verified"],
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

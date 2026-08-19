@@ -1,0 +1,59 @@
+{
+  "id": "fixture-010",
+  "description": "Membership (in) — fact value not in the set (no match)",
+  "rule": {
+    "id": "rule.test.010",
+    "code": "TEST-010",
+    "title": "Test rule 010 — in no match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.010",
+      "ruleId": "rule.test.010",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.region",
+        "operator": "in",
+        "value": ["alpha", "beta", "gamma"]
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "RIGHT",
+          "code": "RIGHT_TEST_010",
+          "label": "Right for test 010"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.010.region",
+      "subjectId": "subj.test",
+      "attribute": "test.region",
+      "value": "delta",
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": false,
+    "skippedDueToException": false,
+    "firedEffectCount": 0,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

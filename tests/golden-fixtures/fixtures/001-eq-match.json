@@ -1,0 +1,59 @@
+{
+  "id": "fixture-001",
+  "description": "Simple equality (eq) — fact value equals condition value",
+  "rule": {
+    "id": "rule.test.001",
+    "code": "TEST-001",
+    "title": "Test rule 001 — simple eq match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.001",
+      "ruleId": "rule.test.001",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.color",
+        "operator": "eq",
+        "value": "red"
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "RIGHT",
+          "code": "RIGHT_TEST_001",
+          "label": "Right for test 001"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.001.color",
+      "subjectId": "subj.test",
+      "attribute": "test.color",
+      "value": "red",
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

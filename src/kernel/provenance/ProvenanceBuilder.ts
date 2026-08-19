@@ -180,6 +180,19 @@ function buildEvidenceRefs(rule: Rule, bundleFacts: Fact[], evidence: Evidence[]
 }
 
 class DefaultProvenanceBuilder implements ProvenanceBuilder {
+  /**
+   * @param packageVersions  Map from `packageId` → `version` for every loaded
+   *                         package manifest. The builder looks up the
+   *                         version for each matched rule's `packageId` and
+   *                         stamps it into `Provenance.packageVersion`
+   *                         (per RULE-008). Falls back to the ruleVersion
+   *                         string when the package is not in the map (e.g.
+   *                         tests using synthetic rules).
+   */
+  constructor(
+    private readonly packageVersions: Map<string, string> = new Map(),
+  ) {}
+
   build(
     decisionId: string,
     ruleEvaluations: RuleEvaluationResult[],
@@ -208,10 +221,19 @@ class DefaultProvenanceBuilder implements ProvenanceBuilder {
       const evidenceRefs = buildEvidenceRefs(rule, bundle.request.facts, bundle.evidence);
       const calculation: CalculationStep[] = ev.calculation.map((s) => ({ ...s }));
 
+      // RULE-008: stamp packageId + packageVersion into every provenance entry.
+      // The map is populated by the factory from `registry.listPackages()`;
+      // synthetic tests may not have manifests, so fall back to the rule's
+      // temporal version (best-effort, still identifies the rule version).
+      const packageVersion =
+        this.packageVersions.get(rule.packageId) ?? String(rule.temporal.version);
+
       result.push({
         decisionId,
         ruleId: rule.id,
         ruleVersion: rule.temporal.version,
+        packageId: rule.packageId,
+        packageVersion,
         source,
         authority,
         facts,
@@ -234,7 +256,17 @@ class DefaultProvenanceBuilder implements ProvenanceBuilder {
 
 /**
  * Factory — produces a fresh ProvenanceBuilder.
+ *
+ * @param packageVersions  Optional map of `packageId` → `version` for every
+ *                         loaded package manifest. When supplied, the builder
+ *                         populates `Provenance.packageVersion` from the map
+ *                         (per RULE-008). When omitted, the builder falls back
+ *                         to the rule's `temporal.version` string (best-effort
+ *                         — sufficient for unit tests but not for production
+ *                         historical reproducibility).
  */
-export function createProvenanceBuilder(): ProvenanceBuilder {
-  return new DefaultProvenanceBuilder();
+export function createProvenanceBuilder(
+  packageVersions?: Map<string, string>,
+): ProvenanceBuilder {
+  return new DefaultProvenanceBuilder(packageVersions);
 }

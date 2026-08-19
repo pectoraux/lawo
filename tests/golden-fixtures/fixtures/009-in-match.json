@@ -1,0 +1,59 @@
+{
+  "id": "fixture-009",
+  "description": "Membership (in) — fact value is in the set",
+  "rule": {
+    "id": "rule.test.009",
+    "code": "TEST-009",
+    "title": "Test rule 009 — in match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.009",
+      "ruleId": "rule.test.009",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.region",
+        "operator": "in",
+        "value": ["alpha", "beta", "gamma"]
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "RIGHT",
+          "code": "RIGHT_TEST_009",
+          "label": "Right for test 009"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.009.region",
+      "subjectId": "subj.test",
+      "attribute": "test.region",
+      "value": "beta",
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

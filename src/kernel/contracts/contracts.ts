@@ -57,6 +57,30 @@ export interface RuleEngine {
   evaluateAll(rules: Rule[], facts: Fact[], asOf: string): RuleEvaluationResult[];
 }
 
+/**
+ * Compiled rule engine — ADDITIVE extension of the RuleEngine contract.
+ *
+ * Accepts `CompiledRule` instances (the pre-validated, normalised, hashed
+ * runtime representation produced by `compileRule`). The evaluation algorithm
+ * is identical to `RuleEngine.evaluate`; the compiled path simply trusts the
+ * pre-validated input (per RULE-010, I5, I13).
+ *
+ * Existing callers that hold a `RuleEngine` reference are unaffected; callers
+ * that want the compiled methods hold a `CompiledRuleEngine` reference.
+ */
+export interface CompiledRuleEngine extends RuleEngine {
+  evaluateCompiled(
+    rule: import('@/kernel/rules/CompiledRule').CompiledRule,
+    facts: Fact[],
+    asOf: string,
+  ): RuleEvaluationResult;
+  evaluateAllCompiled(
+    rules: import('@/kernel/rules/CompiledRule').CompiledRule[],
+    facts: Fact[],
+    asOf: string,
+  ): RuleEvaluationResult[];
+}
+
 // Re-exported from the primitives module so callers don't need to know where it lives.
 export type { RuleEvaluationResult } from '@/kernel/primitives/types';
 

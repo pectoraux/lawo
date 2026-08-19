@@ -74,6 +74,20 @@ export interface Provenance {
   decisionId: string;
   ruleId: string;
   ruleVersion: number;
+  /**
+   * The package this rule came from. Populated by ProvenanceBuilder from
+   * `Rule.packageId`. Together with `packageVersion`, this identifies the
+   * exact package/rule versions used to produce a decision (per RULE-008,
+   * I6, I13 — historical reproducibility requires pinning package versions).
+   */
+  packageId: string;
+  /**
+   * The exact version of the package the rule came from. Populated by
+   * ProvenanceBuilder from the package manifest's `version` field via the
+   * `packageVersions` map passed to the builder factory. Falls back to
+   * `ruleVersion` (best-effort) when no manifest version is available.
+   */
+  packageVersion: string;
   source: SourceRef;
   authority: AuthorityRef;
   facts: FactRef[];

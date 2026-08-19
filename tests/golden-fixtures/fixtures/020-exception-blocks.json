@@ -1,0 +1,75 @@
+{
+  "id": "fixture-020",
+  "description": "Exception — conditions match but exception blocks the rule (skipped)",
+  "rule": {
+    "id": "rule.test.020",
+    "code": "TEST-020",
+    "title": "Test rule 020 — exception blocks",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.020",
+      "ruleId": "rule.test.020",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.count",
+        "operator": "gt",
+        "value": 10
+      },
+      "exceptions": [
+        {
+          "kind": "leaf",
+          "fact": "test.exempt",
+          "operator": "eq",
+          "value": true
+        }
+      ],
+      "effects": [
+        {
+          "kind": "OBLIGATION",
+          "code": "OBLIGATION_TEST_020",
+          "label": "Obligation for test 020"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.020.count",
+      "subjectId": "subj.test",
+      "attribute": "test.count",
+      "value": 50,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    },
+    {
+      "id": "fact.test.020.exempt",
+      "subjectId": "subj.test",
+      "attribute": "test.exempt",
+      "value": true,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": false,
+    "skippedDueToException": true,
+    "firedEffectCount": 0,
+    "truthLevel": "T0",
+    "calculationSteps": 4
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "id": "fixture-015",
+  "description": "Nested AND — all children match (rule fires)",
+  "rule": {
+    "id": "rule.test.015",
+    "code": "TEST-015",
+    "title": "Test rule 015 — nested AND all match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.015",
+      "ruleId": "rule.test.015",
+      "conditions": {
+        "kind": "and",
+        "children": [
+          {
+            "kind": "leaf",
+            "fact": "test.color",
+            "operator": "eq",
+            "value": "red"
+          },
+          {
+            "kind": "leaf",
+            "fact": "test.count",
+            "operator": "gt",
+            "value": 10
+          },
+          {
+            "kind": "leaf",
+            "fact": "test.region",
+            "operator": "in",
+            "value": ["alpha", "beta"]
+          }
+        ]
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "RIGHT",
+          "code": "RIGHT_TEST_015",
+          "label": "Right for test 015"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.015.color",
+      "subjectId": "subj.test",
+      "attribute": "test.color",
+      "value": "red",
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    },
+    {
+      "id": "fact.test.015.count",
+      "subjectId": "subj.test",
+      "attribute": "test.count",
+      "value": 25,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    },
+    {
+      "id": "fact.test.015.region",
+      "subjectId": "subj.test",
+      "attribute": "test.region",
+      "value": "alpha",
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

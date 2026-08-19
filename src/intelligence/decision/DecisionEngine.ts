@@ -85,7 +85,11 @@ class DefaultDecisionEngine implements DecisionEngine {
 
     // 6. Build provenance chains for matched rules.
     const matchedEvaluations = evaluations.filter((e) => e.matched);
-    const provenanceBuilder = createProvenanceBuilder();
+    // RULE-008: pass packageId → version map so provenance identifies exact
+    // package/rule versions. We build the map from the registry's manifests.
+    const packageVersions = new Map<string, string>();
+    for (const m of registry.listPackages()) packageVersions.set(m.packageId, m.version);
+    const provenanceBuilder = createProvenanceBuilder(packageVersions);
     const provenance = provenanceBuilder.build(
       decisionId,
       matchedEvaluations,

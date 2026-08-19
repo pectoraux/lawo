@@ -1,0 +1,59 @@
+{
+  "id": "fixture-011",
+  "description": "Contains (string) — fact string contains the condition value",
+  "rule": {
+    "id": "rule.test.011",
+    "code": "TEST-011",
+    "title": "Test rule 011 — contains string match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.011",
+      "ruleId": "rule.test.011",
+      "conditions": {
+        "kind": "leaf",
+        "fact": "test.text",
+        "operator": "contains",
+        "value": "urgent"
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "OBLIGATION",
+          "code": "OBLIGATION_TEST_011",
+          "label": "Obligation for test 011"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.011.text",
+      "subjectId": "subj.test",
+      "attribute": "test.text",
+      "value": "Please review this urgent matter ASAP",
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

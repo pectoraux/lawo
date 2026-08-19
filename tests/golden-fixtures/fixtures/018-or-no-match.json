@@ -1,0 +1,70 @@
+{
+  "id": "fixture-018",
+  "description": "Nested OR — no children match (rule does not fire)",
+  "rule": {
+    "id": "rule.test.018",
+    "code": "TEST-018",
+    "title": "Test rule 018 — nested OR no match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.018",
+      "ruleId": "rule.test.018",
+      "conditions": {
+        "kind": "or",
+        "children": [
+          {
+            "kind": "leaf",
+            "fact": "test.color",
+            "operator": "eq",
+            "value": "red"
+          },
+          {
+            "kind": "leaf",
+            "fact": "test.color",
+            "operator": "eq",
+            "value": "blue"
+          }
+        ]
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "PERMISSION",
+          "code": "PERMISSION_TEST_018",
+          "label": "Permission for test 018"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.018.color",
+      "subjectId": "subj.test",
+      "attribute": "test.color",
+      "value": "green",
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": false,
+    "skippedDueToException": false,
+    "firedEffectCount": 0,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}

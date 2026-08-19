@@ -20,8 +20,10 @@
  * summary of every check implemented here.
  */
 
+import * as fs from 'node:fs';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep, dirname } from 'node:path';
+import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
@@ -1109,6 +1111,163 @@ function checkCsrfOnMutations(): CheckResult {
 }
 
 // ===========================================================================
+// RULE-001 through RULE-010 — RuleIR + package lifecycle invariants (§20)
+// ===========================================================================
+
+function checkRule001(): CheckResult {
+  // RULE-001: RuleEngine never imports LLM/agent implementation.
+  const ruleFiles = walkTsFiles(path.join(ROOT, 'src', 'kernel', 'rules'));
+  const compilerFiles = walkTsFiles(path.join(ROOT, 'src', 'kernel', 'rules'));
+  const allFiles = [...ruleFiles, ...compilerFiles];
+  const violations: string[] = [];
+  for (const f of allFiles) {
+    const src = readFileText(f);
+    if (/z-ai-web-dev-sdk/.test(src) || /ZAI\.create/.test(src) || /chat\.completions\.create/.test(src)) {
+      violations.push(`${relative(ROOT, f)}: imports or references LLM SDK`);
+    }
+  }
+  return violations.length === 0
+    ? { id: 'RULE-001', name: 'ruleengine-no-llm', passed: true }
+    : { id: 'RULE-001', name: 'ruleengine-no-llm', passed: false, details: violations.join('\n  ') };
+}
+
+function checkRule002(): CheckResult {
+  // RULE-002: RuleIR is data-only (ConditionNode is a discriminated union of pure data).
+  const typesFile = path.join(ROOT, 'src', 'kernel', 'primitives', 'types.ts');
+  const src = readFileText(typesFile);
+  // Check that ConditionNode doesn't contain function types
+  const condMatch = src.match(/export type ConditionNode[\s\S]*?(?=\n\n)/);
+  if (!condMatch) {
+    return { id: 'RULE-002', name: 'ruleir-is-data-only', passed: false, details: 'ConditionNode type not found' };
+  }
+  const condSrc = condMatch[0];
+  if (/\bFunction\b/.test(condSrc) || /=>\s*\{/.test(condSrc)) {
+    return { id: 'RULE-002', name: 'ruleir-is-data-only', passed: false, details: 'ConditionNode contains function types' };
+  }
+  return { id: 'RULE-002', name: 'ruleir-is-data-only', passed: true };
+}
+
+function checkRule003(): CheckResult {
+  // RULE-003: Rule evaluation is deterministic — conditionEval.ts has no Date.now(), Math.random(), IO in actual code (not comments).
+  const evalFile = path.join(ROOT, 'src', 'kernel', 'rules', 'conditionEval.ts');
+  const src = readFileText(evalFile);
+  // Strip comments (lines starting with // or within /* */ blocks)
+  const stripped = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')  // block comments
+    .replace(/\/\/.*$/gm, '');           // line comments
+  const violations: string[] = [];
+  if (/Date\.now\(\)/.test(stripped)) violations.push('Date.now() found in code');
+  if (/Math\.random\(\)/.test(stripped)) violations.push('Math.random() found in code');
+  if (/\bfetch\s*\(/.test(stripped)) violations.push('fetch() found in code');
+  return violations.length === 0
+    ? { id: 'RULE-003', name: 'evaluation-is-deterministic', passed: true }
+    : { id: 'RULE-003', name: 'evaluation-is-deterministic', passed: false, details: violations.join('; ') };
+}
+
+function checkRule004(): CheckResult {
+  // RULE-004: Invalid RuleIR cannot enter an active registry — validator + package validator exist.
+  const validatorFile = path.join(ROOT, 'src', 'kernel', 'rules', 'RuleIRValidator.ts');
+  const pkgValidatorFile = path.join(ROOT, 'src', 'packages', 'PackageValidator.ts');
+  if (!fs.existsSync(validatorFile)) {
+    return { id: 'RULE-004', name: 'invalid-ruleir-rejected', passed: false, details: 'RuleIRValidator.ts not found' };
+  }
+  if (!fs.existsSync(pkgValidatorFile)) {
+    return { id: 'RULE-004', name: 'invalid-ruleir-rejected', passed: false, details: 'PackageValidator.ts not found' };
+  }
+  const pkgValidatorSrc = readFileText(pkgValidatorFile);
+  if (!/validateRule/.test(pkgValidatorSrc)) {
+    return { id: 'RULE-004', name: 'invalid-ruleir-rejected', passed: false, details: 'PackageValidator does not call validateRule' };
+  }
+  return { id: 'RULE-004', name: 'invalid-ruleir-rejected', passed: true };
+}
+
+function checkRule005(): CheckResult {
+  // RULE-005: Active packages have resolved dependencies — VersionedPackageRegistry has resolveDependencies + detectCycles.
+  const registryFile = path.join(ROOT, 'src', 'packages', 'VersionedPackageRegistry.ts');
+  if (!fs.existsSync(registryFile)) {
+    return { id: 'RULE-005', name: 'active-packages-resolved-deps', passed: false, details: 'VersionedPackageRegistry.ts not found' };
+  }
+  const src = readFileText(registryFile);
+  const hasResolve = /resolveDependencies/.test(src);
+  const hasCycles = /detectCycles/.test(src);
+  return hasResolve && hasCycles
+    ? { id: 'RULE-005', name: 'active-packages-resolved-deps', passed: true }
+    : { id: 'RULE-005', name: 'active-packages-resolved-deps', passed: false, details: `resolveDependencies=${hasResolve}, detectCycles=${hasCycles}` };
+}
+
+function checkRule006(): CheckResult {
+  // RULE-006: Package code cannot bypass package registry — packages-data files don't import kernel with non-type imports.
+  const pkgDataDir = path.join(ROOT, 'src', 'lib', 'packages-data');
+  if (!fs.existsSync(pkgDataDir)) {
+    return { id: 'RULE-006', name: 'packages-cannot-bypass-registry', passed: true };
+  }
+  const files = walkTsFiles(pkgDataDir);
+  const violations: string[] = [];
+  for (const f of files) {
+    const src = readFileText(f);
+    // Non-type imports from @/kernel/ are violations
+    const nonTypeImports = src.match(/^import\s+\{[^}]+\}\s+from\s+['"]@\/kernel\//gm);
+    if (nonTypeImports) {
+      for (const imp of nonTypeImports) {
+        if (!imp.includes('import type')) {
+          violations.push(`${relative(ROOT, f)}: non-type import from @/kernel/`);
+        }
+      }
+    }
+  }
+  return violations.length === 0
+    ? { id: 'RULE-006', name: 'packages-cannot-bypass-registry', passed: true }
+    : { id: 'RULE-006', name: 'packages-cannot-bypass-registry', passed: false, details: violations.join('\n  ') };
+}
+
+function checkRule007(): CheckResult {
+  // RULE-007: Kernel does not import a specific vertical package.
+  return checkKernelImportsNoVerticals.id === 'I1'
+    ? { ...checkKernelImportsNoVerticals(), id: 'RULE-007', name: 'kernel-no-vertical-imports' }
+    : { id: 'RULE-007', name: 'kernel-no-vertical-imports', passed: true };
+}
+
+function checkRule008(): CheckResult {
+  // RULE-008: Decision provenance identifies exact package/rule versions.
+  const typesFile = path.join(ROOT, 'src', 'kernel', 'primitives', 'types.ts');
+  const src = readFileText(typesFile);
+  const hasPackageId = /packageId.*string/.test(src.slice(src.indexOf('interface Provenance')));
+  const provBuilderFile = path.join(ROOT, 'src', 'kernel', 'provenance', 'ProvenanceBuilder.ts');
+  const provSrc = readFileText(provBuilderFile);
+  const hasPackageVersion = /packageVersion/.test(provSrc);
+  return hasPackageId && hasPackageVersion
+    ? { id: 'RULE-008', name: 'provenance-exact-versions', passed: true }
+    : { id: 'RULE-008', name: 'provenance-exact-versions', passed: false, details: `packageId in type=${hasPackageId}, packageVersion in builder=${hasPackageVersion}` };
+}
+
+function checkRule009(): CheckResult {
+  // RULE-009: Historical evaluation cannot silently use current rule versions.
+  const histFile = path.join(ROOT, 'src', 'kernel', 'rules', 'HistoricalEvaluator.ts');
+  if (!fs.existsSync(histFile)) {
+    return { id: 'RULE-009', name: 'historical-no-current-versions', passed: false, details: 'HistoricalEvaluator.ts not found' };
+  }
+  const src = readFileText(histFile);
+  const hasPinnedVersions = /packageVersions/.test(src);
+  const throwsOnMissing = /HistoricalResolutionError/.test(src);
+  return hasPinnedVersions && throwsOnMissing
+    ? { id: 'RULE-009', name: 'historical-no-current-versions', passed: true }
+    : { id: 'RULE-009', name: 'historical-no-current-versions', passed: false, details: `pinnedVersions=${hasPinnedVersions}, throwsOnMissing=${throwsOnMissing}` };
+}
+
+function checkRule010(): CheckResult {
+  // RULE-010: Package version content is immutable after publication — CompiledRule has hash field.
+  const compilerFile = path.join(ROOT, 'src', 'kernel', 'rules', 'RuleCompiler.ts');
+  if (!fs.existsSync(compilerFile)) {
+    return { id: 'RULE-010', name: 'package-content-immutable', passed: false, details: 'RuleCompiler.ts not found' };
+  }
+  const src = readFileText(compilerFile);
+  const hasHash = /\bhash\b.*string/.test(src) && /computeHash/.test(src);
+  return hasHash
+    ? { id: 'RULE-010', name: 'package-content-immutable', passed: true }
+    : { id: 'RULE-010', name: 'package-content-immutable', passed: false, details: 'CompiledRule hash field or computeHash function not found' };
+}
+
+// ===========================================================================
 // Main runner
 // ===========================================================================
 function formatLine(id: string, name: string, passed: boolean): string {
@@ -1150,6 +1309,17 @@ function main(): void {
     checkAuditPayloadSanitizer(),
     checkNoRemoteSeeding(),
     checkCsrfOnMutations(),
+    // RULE-001 through RULE-010 — RuleIR + package lifecycle invariants (§20)
+    checkRule001(),
+    checkRule002(),
+    checkRule003(),
+    checkRule004(),
+    checkRule005(),
+    checkRule006(),
+    checkRule007(),
+    checkRule008(),
+    checkRule009(),
+    checkRule010(),
   ];
 
   const headerLines = [

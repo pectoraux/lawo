@@ -1,0 +1,62 @@
+{
+  "id": "fixture-019",
+  "description": "NOT — inverts a match (rule fires because inner condition is false)",
+  "rule": {
+    "id": "rule.test.019",
+    "code": "TEST-019",
+    "title": "Test rule 019 — NOT inverts match",
+    "jurisdictionId": "jur.test",
+    "authorityId": "auth.test",
+    "sourceId": "src.test",
+    "type": "DETERMINISTIC",
+    "ruleIr": {
+      "id": "ruleir.test.019",
+      "ruleId": "rule.test.019",
+      "conditions": {
+        "kind": "not",
+        "child": {
+          "kind": "leaf",
+          "fact": "test.flag",
+          "operator": "eq",
+          "value": true
+        }
+      },
+      "exceptions": [],
+      "effects": [
+        {
+          "kind": "RIGHT",
+          "code": "RIGHT_TEST_019",
+          "label": "Right for test 019"
+        }
+      ]
+    },
+    "temporal": {
+      "validFrom": "2020-01-01",
+      "validTo": null,
+      "version": 1,
+      "supersedes": null,
+      "supersededBy": null
+    },
+    "packageId": "pkg.test",
+    "truthLevel": "T0"
+  },
+  "facts": [
+    {
+      "id": "fact.test.019.flag",
+      "subjectId": "subj.test",
+      "attribute": "test.flag",
+      "value": false,
+      "truthLevel": "T0",
+      "observedAt": "2025-01-15",
+      "tenantId": null
+    }
+  ],
+  "asOf": "2025-01-15",
+  "expected": {
+    "matched": true,
+    "skippedDueToException": false,
+    "firedEffectCount": 1,
+    "truthLevel": "T0",
+    "calculationSteps": 3
+  }
+}
