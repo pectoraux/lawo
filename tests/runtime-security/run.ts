@@ -745,7 +745,7 @@ async function testAtomicity005(cookieA: string) {
     where: { subjectId, action: 'decision.persist' },
   });
 
-  record('ATOMICITY-005: No intermediate state — exactly 1 decision record after commit',
+  record('ATOMICITY-005: Post-commit state contains exactly one decision and one audit',
     persisted === true && count === 1 && auditCount >= 1,
     `persisted=${persisted}, decisionCount=${count}, auditCount=${auditCount}`);
 }

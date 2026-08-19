@@ -254,13 +254,13 @@ model DecisionRecord {
   truthLevel      TruthLevel  @default(T0)
   // Explicit correlation identifier. Matches AuditEvent.correlationId so
   // a decision and its durable audit event are bidirectionally linked.
-  // decisionId is the canonical correlation key; this column is redundant
-  // for query convenience (avoids JSON-path lookup on the audit side).
-  correlationId   String?
+  // UNIQUE: there is exactly one canonical DecisionRecord per decisionId.
+  // (AuditEvent.correlationId is NOT unique — multiple audit events can
+  // reference the same decision: persist, reviewed, appealed, executed, etc.)
+  correlationId   String?  @unique
 
   @@index([tenantId, computedAt])
   @@index([subjectId])
-  @@index([correlationId])
 }
 
 // -----------------------------------------------------------------------------
