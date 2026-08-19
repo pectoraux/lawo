@@ -4,24 +4,36 @@
  *   ContextBuilder → RuleEngine → StateEngine → ProvenanceBuilder → AuditLog
  * Returns the computed StateSnapshot, provenance chain, and audit events.
  *
- * DECISION INTEGRITY (Phase 3):
+ * DECISION INTEGRITY (ADR 0013):
  *   The client sends a DecisionRequest: { subjectId, asOf, situationId, facts,
  *   jurisdictionIds, objective }. The server runs the DecisionEngine and
  *   produces the authoritative DecisionRecord fields (truthLevel, provenance,
  *   state, computedAt). The client CANNOT supply these fields.
  *
- *   If `persist: true`, the resulting DecisionRecord is saved server-side,
- *   scoped to the authenticated user's tenantId (NEVER a client-supplied tenantId).
+ * FACT INGESTION CONTRACT (ADR 0017):
+ *   API-supplied facts are UNTRUSTED INPUT. The server normalizes every
+ *   submitted fact's `tenantId` to the authenticated session's tenantId.
+ *   A tenant-A user cannot manufacture facts that claim to belong to tenant B.
+ *   The fact's `truthLevel` is preserved (the caller may assert a fact at T0
+ *   if they have authoritative evidence; the engine and UI surface this).
+ *
+ * TRANSACTIONAL PERSISTENCE (ADR 0017):
+ *   When `persist: true`, the decision record AND its durable audit event are
+ *   persisted as a unit. If either fails, the API returns an error — it does
+ *   NOT silently return HTTP 200 while persistence failed. The response
+ *   explicitly distinguishes:
+ *     - computed successfully (persist=false)
+ *     - computed + persisted durably (persist=true, success)
+ *     - computed but persistence failed (persist=true, failure → HTTP 500)
  *
  * Deterministic modulo informational timestamps (I5, I6, I13).
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { createPackageRegistry } from '@/packages/registry/PackageRegistry';
 import { createDecisionEngine } from '@/intelligence/decision/DecisionEngine';
-import { createDbAuditLog, createInMemoryAuditLog } from '@/platform/audit/AuditLog';
 import { requireUserWithScope } from '@/lib/auth/guards';
 import { db } from '@/lib/db';
-import { recordAuditBestEffort } from '@/lib/auth/audit';
+import { recordAudit } from '@/lib/auth/audit';
 import type { ContextRequest, Fact } from '@/kernel/primitives/types';
 
 export const dynamic = 'force-dynamic';
@@ -33,7 +45,7 @@ interface StateRequestBody {
   facts: Fact[];
   jurisdictionIds: string[];
   objective?: string;
-  persist?: boolean;             // if true, persist the DecisionRecord server-side
+  persist?: boolean;             // if true, persist the DecisionRecord + durable audit
 }
 
 export async function POST(req: NextRequest) {
@@ -56,8 +68,19 @@ export async function POST(req: NextRequest) {
   }
 
   const registry = createPackageRegistry();
-  const auditLog = body.persist ? createDbAuditLog() : createInMemoryAuditLog();
-  const decisionEngine = createDecisionEngine(auditLog);
+  const decisionEngine = createDecisionEngine();
+
+  // FACT NORMALIZATION (ADR 0017): API-supplied facts are untrusted input.
+  // Override every fact's tenantId with the session's tenantId so a caller
+  // cannot manufacture facts that claim to belong to another tenant.
+  // The fact's truthLevel, attribute, value, and observedAt are preserved —
+  // the caller may assert a fact at any truth level; the engine and UI
+  // surface this transparently.
+  const normalizedFacts: Fact[] = body.facts.map((f) => ({
+    ...f,
+    tenantId: user.tenantId,
+    subjectId: body.subjectId, // facts are about the request's subject
+  }));
 
   // The tenantId is derived from the authenticated session — NEVER from the
   // client. This is the core tenant-authorization enforcement.
@@ -65,7 +88,7 @@ export async function POST(req: NextRequest) {
     subjectId: body.subjectId,
     asOf: body.asOf,
     situationId: body.situationId,
-    facts: body.facts,
+    facts: normalizedFacts,
     jurisdictionIds: body.jurisdictionIds,
     objective: body.objective,
     tenantId: user.tenantId,
@@ -73,12 +96,14 @@ export async function POST(req: NextRequest) {
 
   const result = decisionEngine.decide(contextRequest, registry);
 
-  // If persist=true, save the DecisionRecord server-side. All authoritative
-  // fields (truthLevel, provenance, state, computedAt) come from the engine,
-  // not the client. The record is scoped to the caller's tenantId.
+  // If persist=true, persist the decision record + durable audit transactionally.
+  // If either fails, return an error — do NOT silently return success.
+  let persisted = false;
+  let persistenceError: string | null = null;
   if (body.persist && result.state.firedEffects.length > 0) {
     try {
-      await db.decisionRecord.create({
+      // 1. Persist the DecisionRecord.
+      const record = await db.decisionRecord.create({
         data: {
           decisionId: result.state.provenance[0]?.decisionId ?? `dec_${Date.now()}`,
           subjectId: body.subjectId,
@@ -91,22 +116,47 @@ export async function POST(req: NextRequest) {
           tenantId: user.tenantId,
         },
       });
-      await recordAuditBestEffort({
-        tenantId: user.tenantId,
-        actor: user.email,
-        action: 'decision.persist',
-        subjectId: body.subjectId,
-        severity: 'INFO',
-        payload: {
-          situationId: body.situationId ?? null,
-          firedEffects: result.state.firedEffects.length,
-          truthLevel: result.state.truthLevel,
-        },
-      });
+
+      // 2. Persist the durable audit event. If this fails, roll back the
+      //    decision record so we don't have an un-audited persisted decision.
+      try {
+        await recordAudit({
+          tenantId: user.tenantId,
+          actor: user.email,
+          action: 'decision.persist',
+          subjectId: body.subjectId,
+          severity: 'INFO',
+          payload: {
+            decisionRecordId: record.id,
+            decisionId: record.decisionId,
+            situationId: body.situationId ?? null,
+            firedEffects: result.state.firedEffects.length,
+            truthLevel: result.state.truthLevel,
+          },
+        });
+        persisted = true;
+      } catch (auditErr) {
+        // Durable audit failed — roll back the decision record.
+        await db.decisionRecord.delete({ where: { id: record.id } }).catch(() => {});
+        console.error('[state] durable audit failed — rolled back decision record:', auditErr);
+        persistenceError = 'Audit persistence failed — the decision was not persisted.';
+      }
     } catch (err) {
-      // Persistence failure is non-fatal — the decision was still computed
-      // and returned to the caller. Log and continue.
       console.error('[state] decision persistence failed:', err);
+      persistenceError = err instanceof Error ? err.message : 'Decision persistence failed.';
+    }
+
+    if (persistenceError) {
+      return NextResponse.json(
+        {
+          error: 'Decision was computed but could not be persisted durably.',
+          detail: persistenceError,
+          state: result.state,
+          provenance: result.provenance,
+          audit: result.audit,
+        },
+        { status: 500 },
+      );
     }
   }
 
@@ -114,5 +164,6 @@ export async function POST(req: NextRequest) {
     state: result.state,
     provenance: result.provenance,
     audit: result.audit,
+    persisted,
   });
 }

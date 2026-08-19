@@ -7,10 +7,9 @@
  *   ContextBuilder → RuleEngine → StateEngine → ProvenanceBuilder
  *                 → AuditEvent[]
  *
- * The DecisionEngine is the only component that records audit events (via
- * the injected AuditLog). It does NOT call any LLM (I5) — the entire
- * pipeline is deterministic modulo `producedAt` / `computedAt` /
- * `timestamp` (informational ISO timestamps).
+ * The DecisionEngine does NOT call any LLM (I5) — the entire pipeline is
+ * deterministic modulo `producedAt` / `computedAt` / `timestamp`
+ * (informational ISO timestamps).
  *
  * Inputs:
  *   - request:  ContextRequest (subjectId, asOf, facts, jurisdictionIds, ...)
@@ -21,16 +20,21 @@
  *   - provenance: Provenance[] (one per matched rule evaluation)
  *   - audit:      AuditEvent[] (at minimum: one "decision.computed" event)
  *
- * The injected AuditLog defaults to createInMemoryAuditLog() so callers
- * that don't supply one still see audit events in the returned array.
+ * AUDIT CONTRACT (aligned with ADR 0014):
+ *   The engine does NOT persist audit events itself. It constructs the
+ *   AuditEvent[] array and returns it to the caller. The caller (the route
+ *   handler) is responsible for persisting the audit event via the
+ *   appropriate AuditLog method:
+ *     - record()       for durable persistence (throws on failure)
+ *     - recordBestEffort() for non-durable informational events
  *
- * Synchronous contract: `decide()` returns the result synchronously
- * (the contract type is sync). The AuditLog itself is async, so the
- * engine enqueues the record call without awaiting — it constructs the
- * AuditEvent locally (id + timestamp) so callers see the event in the
- * response immediately, and the persistence call is fired-and-forget
- * (errors swallowed silently — audit recording MUST NEVER throw, per
- * the AuditLog contract).
+ *   This removes the previous fire-and-forget contract that conflicted with
+ *   the AuditLog's durable record() method. The engine is now audit-log
+ *   agnostic — it doesn't inject or call an AuditLog at all. Callers that
+ *   want audit persistence must do it explicitly at the route boundary.
+ *
+ *   This is the correct separation: the engine computes; the route handler
+ *   decides the durability policy.
  */
 
 import type {
@@ -44,16 +48,8 @@ import { createContextBuilder } from '@/intelligence/context/ContextBuilder';
 import { createRuleEngine } from '@/kernel/rules/RuleEngine';
 import { createStateEngine } from '@/kernel/state/StateEngine';
 import { createProvenanceBuilder } from '@/kernel/provenance/ProvenanceBuilder';
-import { createInMemoryAuditLog } from '@/platform/audit/AuditLog';
-import type { AuditLog } from '@/platform/audit/AuditLog';
 
 class DefaultDecisionEngine implements DecisionEngine {
-  private readonly auditLog: AuditLog;
-
-  constructor(auditLog?: AuditLog) {
-    this.auditLog = auditLog ?? createInMemoryAuditLog();
-  }
-
   decide(
     request: ContextRequest,
     registry: PackageRegistry,
@@ -100,12 +96,10 @@ class DefaultDecisionEngine implements DecisionEngine {
     );
     state.provenance = provenance;
 
-    // 7. Emit an audit event: "decision.computed".
-    //    We synthesize id + timestamp locally so the caller sees the event
-    //    synchronously. We then enqueue the audit-log record() call — the
-    //    AuditLog will assign its own id/timestamp for persistence, which is
-    //    acceptable: the audit array returned here is for the immediate
-    //    response; the persisted record is for the long-term trail.
+    // 7. Construct the audit event. The engine does NOT persist it — the
+    //    caller (route handler) is responsible for durability. This aligns
+    //    with ADR 0014: the route handler decides whether to use durable
+    //    record() or non-durable recordBestEffort().
     const auditEvent: AuditEvent = {
       id: crypto.randomUUID(),
       tenantId: request.tenantId ?? null,
@@ -123,26 +117,6 @@ class DefaultDecisionEngine implements DecisionEngine {
       },
     };
 
-    // Fire-and-forget: persist to the audit log. Never throw from this path.
-    // We include the persisted event id in the response payload for callers
-    // that want to correlate later.
-    const persistedPromise = this.auditLog
-      .record({
-        tenantId: auditEvent.tenantId,
-        actor: auditEvent.actor,
-        action: auditEvent.action,
-        subjectId: auditEvent.subjectId,
-        severity: auditEvent.severity,
-        payload: { ...auditEvent.payload, responseEventId: auditEvent.id },
-      })
-      .catch((err: unknown) => {
-        // Audit recording MUST NEVER throw (AuditLog contract). If the
-        // underlying log fails despite its own safeguards, log to console
-        // and continue — the response still carries the local event.
-        console.warn('[DecisionEngine] auditLog.record failed:', err);
-      });
-    void persistedPromise;
-
     return {
       state,
       provenance,
@@ -152,9 +126,10 @@ class DefaultDecisionEngine implements DecisionEngine {
 }
 
 /**
- * Factory — produces a fresh DecisionEngine with the supplied audit log
- * (or the in-memory default if none is supplied).
+ * Factory — produces a fresh DecisionEngine. The auditLog parameter is
+ * accepted for backward compatibility with the contract interface but is
+ * no longer used (the engine does not persist audit events; callers do).
  */
-export function createDecisionEngine(auditLog?: AuditLog): DecisionEngine {
-  return new DefaultDecisionEngine(auditLog);
+export function createDecisionEngine(_auditLog?: unknown): DecisionEngine {
+  return new DefaultDecisionEngine();
 }

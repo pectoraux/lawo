@@ -254,7 +254,10 @@ async function testAuthz001(cookieA: string) {
 
 async function testAuthz002(cookieA: string) {
   // User A cannot write a decision into tenant B — client-supplied tenantId is ignored.
-  // Attempt to inject tenantB into the request body.
+  // This test queries the DB DIRECTLY (not just the API response) to prove
+  // no record was written into tenant B. The API response doesn't include
+  // tenantId, so checking the response alone is insufficient — a broken read
+  // path could make a write test appear to pass.
   const postRes = await apiPost('/api/state', {
     subjectId: 'subject_injected',
     asOf: '2025-01-15',
@@ -275,16 +278,24 @@ async function testAuthz002(cookieA: string) {
   const state = (postRes.body as { state?: { firedEffects?: unknown[] } }).state;
   const computed = postRes.status === 200 && Array.isArray(state?.firedEffects);
 
-  // Query all decisions visible to user A. The injected decision should appear
-  // (it was persisted in user A's tenant, NOT tenant B).
-  const afterRes = await apiGet('/api/decisions?limit=50', cookieA);
-  const decisions = (afterRes.body as { decisions?: Array<{ subjectId?: string; tenantId?: string }> }).decisions ?? [];
+  // DIRECT DB CHECK: query for any decision record in tenant B with this subjectId.
+  // This is the authoritative proof — the API response is not trusted.
+  const injectedIntoB = await db.decisionRecord.findFirst({
+    where: { subjectId: 'subject_injected', tenantId: FIXTURE.tenantB },
+    select: { id: true },
+  });
 
-  // The KEY assertion: no decision was written into tenant B.
-  const injectedIntoB = decisions.some((d) => d.tenantId === FIXTURE.tenantB);
-  record('AUTHZ-002: Client-supplied tenantId ignored by /api/state',
-    !injectedIntoB && computed,
-    injectedIntoB ? 'CRITICAL: decision was written into tenant B!' : `POST ${postRes.status}, ${decisions.length} decisions visible to A, none in tenant B`);
+  // Also verify the record WAS persisted (in tenant A, as expected).
+  const persistedInA = await db.decisionRecord.findFirst({
+    where: { subjectId: 'subject_injected', tenantId: FIXTURE.tenantA },
+    select: { id: true },
+  });
+
+  record('AUTHZ-002: Client-supplied tenantId ignored (DB-verified)',
+    !injectedIntoB && computed && !!persistedInA,
+    injectedIntoB ? 'CRITICAL: decision was written into tenant B!' :
+    !persistedInA ? 'decision was not persisted at all' :
+    `computed=${computed}, persisted in tenant A (not B)`);
 }
 
 async function testAuthz003(cookieA: string) {
@@ -398,6 +409,105 @@ async function testIntegrity003(cookieA: string) {
     `provenance=${state?.provenance?.length ?? 0} entries, truthLevel=${state?.truthLevel}`);
 }
 
+async function testIntegrity004(cookieA: string) {
+  // Fact tenant normalization: submitted facts carry tenantId=tenantB but the
+  // server normalizes them to the session's tenantId. The decision still
+  // computes correctly (facts are about the subject, not the tenant), but the
+  // persisted decision record is in tenant A, and no fact in the engine's
+  // context carries tenantB.
+  const { body } = await apiPost('/api/state', {
+    subjectId: 'subject_fact_norm',
+    asOf: '2025-01-15',
+    situationId: 'sit.border-crossing',
+    facts: [
+      // All facts claim tenantB — the server must normalize them to tenantA.
+      { id: 'fn1', subjectId: 'subject_fact_norm', attribute: 'nationality', value: 'GH', truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantB },
+      { id: 'fn2', subjectId: 'subject_fact_norm', attribute: 'destinationCountry', value: 'TG', truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantB },
+      { id: 'fn3', subjectId: 'subject_fact_norm', attribute: 'goodsValueUsd', value: 300, truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantB },
+      { id: 'fn4', subjectId: 'subject_fact_norm', attribute: 'goodsPurpose', value: 'personal', truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantB },
+      { id: 'fn5', subjectId: 'subject_fact_norm', attribute: 'hasProhibitedGoods', value: false, truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantB },
+    ],
+    jurisdictionIds: ['jur.ghana', 'jur.togo'],
+    persist: true,
+  }, cookieA);
+
+  const persisted = (body as { persisted?: boolean }).persisted;
+  const state = (body as { state?: { firedEffects?: unknown[] } }).state;
+  const computed = Array.isArray(state?.firedEffects) && state!.firedEffects!.length > 0;
+
+  // DIRECT DB CHECK: the decision record must be in tenant A, not tenant B.
+  const inA = await db.decisionRecord.findFirst({
+    where: { subjectId: 'subject_fact_norm', tenantId: FIXTURE.tenantA },
+    select: { id: true },
+  });
+  const inB = await db.decisionRecord.findFirst({
+    where: { subjectId: 'subject_fact_norm', tenantId: FIXTURE.tenantB },
+    select: { id: true },
+  });
+
+  record('INTEGRITY-004: Submitted facts normalized to session tenant',
+    computed && persisted && !!inA && !inB,
+    !inA ? 'decision not persisted in tenant A' :
+    inB ? 'CRITICAL: decision leaked into tenant B via facts!' :
+    `computed=${computed}, persisted in tenant A (facts normalized)`);
+}
+
+async function testIntegrity005(cookieA: string) {
+  // Transactional persistence: when persist=true, the response must honestly
+  // report whether persistence succeeded. The response must include `persisted: true`
+  // on success, and must NOT return 200 if persistence failed.
+  const { body, status } = await apiPost('/api/state', {
+    subjectId: 'subject_txn',
+    asOf: '2025-01-15',
+    situationId: 'sit.border-crossing',
+    facts: [
+      { id: 't1', subjectId: 'subject_txn', attribute: 'nationality', value: 'GH', truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantA },
+      { id: 't2', subjectId: 'subject_txn', attribute: 'destinationCountry', value: 'TG', truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantA },
+      { id: 't3', subjectId: 'subject_txn', attribute: 'goodsValueUsd', value: 300, truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantA },
+      { id: 't4', subjectId: 'subject_txn', attribute: 'goodsPurpose', value: 'personal', truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantA },
+      { id: 't5', subjectId: 'subject_txn', attribute: 'hasProhibitedGoods', value: false, truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantA },
+    ],
+    jurisdictionIds: ['jur.ghana', 'jur.togo'],
+    persist: true,
+  }, cookieA);
+
+  const persisted = (body as { persisted?: boolean }).persisted;
+  const hasState = !!(body as { state?: unknown }).state;
+
+  // On success: HTTP 200, persisted=true, state present.
+  // (We can't easily simulate a DB failure in a runtime test without mocking,
+  // but we CAN verify the success path honestly reports persisted=true.)
+  record('INTEGRITY-005: Transactional persistence reports success honestly',
+    status === 200 && persisted === true && hasState,
+    `status=${status}, persisted=${persisted}, hasState=${hasState}`);
+}
+
+async function testIntegrity006(cookieA: string) {
+  // Non-persistent computation: when persist=false (default), the response
+  // must NOT claim persisted=true. This proves the `persisted` field is
+  // meaningful, not always true.
+  const { body } = await apiPost('/api/state', {
+    subjectId: 'subject_nopersist',
+    asOf: '2025-01-15',
+    situationId: 'sit.border-crossing',
+    facts: [
+      { id: 'np1', subjectId: 'subject_nopersist', attribute: 'nationality', value: 'GH', truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantA },
+      { id: 'np2', subjectId: 'subject_nopersist', attribute: 'destinationCountry', value: 'TG', truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantA },
+      { id: 'np3', subjectId: 'subject_nopersist', attribute: 'goodsValueUsd', value: 300, truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantA },
+      { id: 'np4', subjectId: 'subject_nopersist', attribute: 'goodsPurpose', value: 'personal', truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantA },
+      { id: 'np5', subjectId: 'subject_nopersist', attribute: 'hasProhibitedGoods', value: false, truthLevel: 'T0', observedAt: '2025-01-15', tenantId: FIXTURE.tenantA },
+    ],
+    jurisdictionIds: ['jur.ghana', 'jur.togo'],
+    // persist omitted — defaults to false
+  }, cookieA);
+
+  const persisted = (body as { persisted?: boolean }).persisted;
+  // When persist is omitted, persisted must be false (or absent).
+  record('INTEGRITY-006: Non-persistent computation does not claim persisted',
+    persisted === false || persisted === undefined,
+    `persisted=${persisted}`);
+}
+
 async function testWaitlist001(cookieAdmin: string) {
   // Waitlist approve generates invitation URL, not temp password.
   // First create a waitlist entry.
@@ -507,6 +617,9 @@ async function main() {
   await testAuthz008(cookieA);
   await testIntegrity001();
   await testIntegrity003(cookieA);
+  await testIntegrity004(cookieA);
+  await testIntegrity005(cookieA);
+  await testIntegrity006(cookieA);
   await testWaitlist001(cookieAdmin);
   await testWaitlist002(cookieA);
   await testSetpw001();
