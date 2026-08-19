@@ -121,11 +121,13 @@ jobs:
       - name: Seed demo + admin accounts
         run: bun run scripts/seed-users.ts
 
-      - name: Start dev server
+      - name: Start dev server and run runtime tests
         run: |
+          # Start the dev server in the background WITHIN this step.
+          # Each GitHub Actions step runs in its own shell, so the server
+          # must be started and tested in the same step to stay alive.
           nohup bunx next dev -p 3000 > server.log 2>&1 &
-          echo $! > server.pid
-          disown
+          SERVER_PID=$!
           # Wait for the server to be ready
           for i in $(seq 1 60); do
             if curl -s --max-time 2 -o /dev/null http://localhost:3000/api/auth/csrf; then
@@ -134,19 +136,14 @@ jobs:
             fi
             sleep 1
           done
-          # Final check
+          # Final health check
           curl -s --max-time 5 -o /dev/null http://localhost:3000/api/auth/csrf || (echo "Server failed to start" && cat server.log && exit 1)
-
-      - name: Run runtime security tests
-        run: bun run tests/runtime-security/run.ts
-
-      - name: Stop dev server
-        if: always()
-        run: |
-          if [ -f server.pid ]; then
-            kill $(cat server.pid) 2>/dev/null || true
-            rm -f server.pid
-          fi
+          # Run the tests while the server is still running in this step
+          bun run tests/runtime-security/run.ts
+          TEST_EXIT=$?
+          # Kill the server
+          kill $SERVER_PID 2>/dev/null || true
+          exit $TEST_EXIT
 
       - name: Upload server logs on failure
         if: failure()
