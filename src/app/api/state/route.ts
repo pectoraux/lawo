@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createPackageRegistry } from '@/packages/registry/PackageRegistry';
 import { createDecisionEngine } from '@/intelligence/decision/DecisionEngine';
 import { createDbAuditLog, createInMemoryAuditLog } from '@/platform/audit/AuditLog';
+import { guardMutation } from '@/lib/auth/guards';
 import type { ContextRequest, Fact } from '@/kernel/primitives/types';
 
 export const dynamic = 'force-dynamic';
@@ -26,6 +27,9 @@ interface StateRequestBody {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await guardMutation(req);
+  if (guard) return guard;
+
   let body: StateRequestBody;
   try {
     body = (await req.json()) as StateRequestBody;

@@ -7,11 +7,15 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { guardMutation, guardAuthenticated } from '@/lib/auth/guards';
 import type { StateSnapshot, Provenance } from '@/kernel/primitives/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const authGuard = await guardAuthenticated();
+  if (authGuard) return authGuard;
+
   const url = new URL(req.url);
   const subjectId = url.searchParams.get('subjectId');
   const limitParam = url.searchParams.get('limit');
@@ -55,6 +59,9 @@ interface SaveDecisionBody {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await guardMutation(req);
+  if (guard) return guard;
+
   let body: SaveDecisionBody;
   try {
     body = (await req.json()) as SaveDecisionBody;

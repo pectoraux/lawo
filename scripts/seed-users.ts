@@ -1,52 +1,31 @@
 /**
- * Seed script — creates the admin and demo accounts in the Neon DB.
+ * Seed script — creates the DEMO accounts in the Neon DB.
  *
- * Run with: `bun run scripts/seed-users.ts`
+ * Run with: `set -a && source .env && set +a && bun run scripts/seed-users.ts`
  *
- * Idempotent: existing users (matched by email) are upserted — their
- * passwordHash, role, and status are reset to the canonical values.
+ * Idempotent: existing demo users (matched by email) are upserted — their
+ * passwordHash, role, and status are reset to the canonical demo values.
+ *
+ * NOTE: This script seeds ONLY demo accounts (isDemo=true). The real admin
+ * account is bootstrapped via `scripts/admin-bootstrap.ts` which uses the
+ * invitation-token flow (SEC-6) — never an HTTP endpoint.
+ *
+ * Demo passwords are deliberately simple and PUBLISHED in the UI for demo
+ * purposes. Real accounts must not embed secrets in client code.
  */
 import { db } from '../src/lib/db';
 import { hashPassword } from '../src/lib/auth/password';
 import { DEMO_ACCOUNTS } from '../src/lib/auth/demoAccounts';
 
-const ADMIN_EMAIL = 'ekontetevi@gmail';
-const ADMIN_PASSWORD = 'Payswap123456';
-const ADMIN_NAME = 'Ekon Tetevi';
-
-async function ensureTenant(name: string, kind: 'INDIVIDUAL' | 'SMALL_BUSINESS' | 'ENTERPRISE' | 'GOVERNMENT') {
+async function ensureTenant(name: string, kind: 'INDIVIDUAL' | 'SMALL_BUSINESS' | 'ENTERPRISE' | 'GOVERNMENT' | 'PROFESSIONAL_ORG') {
   const existing = await db.tenant.findFirst({ where: { name } });
   if (existing) return existing;
   return db.tenant.create({ data: { name, kind } });
 }
 
 async function main() {
-  console.log('Seeding users in Neon PostgreSQL...\n');
+  console.log('Seeding demo users in Neon PostgreSQL...\n');
 
-  // 1. Admin tenant + user
-  const adminTenant = await ensureTenant('Nomos Platform Administration', 'GOVERNMENT');
-  const admin = await db.user.upsert({
-    where: { email: ADMIN_EMAIL },
-    create: {
-      email: ADMIN_EMAIL,
-      passwordHash: hashPassword(ADMIN_PASSWORD),
-      name: ADMIN_NAME,
-      role: 'ADMIN',
-      status: 'ACTIVE',
-      isDemo: false,
-      tenantId: adminTenant.id,
-    },
-    update: {
-      passwordHash: hashPassword(ADMIN_PASSWORD),
-      name: ADMIN_NAME,
-      role: 'ADMIN',
-      status: 'ACTIVE',
-      tenantId: adminTenant.id,
-    },
-  });
-  console.log(`  admin: ${admin.email} (id=${admin.id}) tenant=${admin.tenantId}`);
-
-  // 2. Demo accounts — each gets a personal tenant
   for (const d of DEMO_ACCOUNTS) {
     const kind =
       d.role === 'GUEST' ? 'INDIVIDUAL' :
@@ -79,11 +58,11 @@ async function main() {
   }
 
   console.log('\nSeed complete.');
-  console.log(`\nAdmin login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
-  console.log('Demo logins:');
+  console.log('\nDemo logins:');
   for (const d of DEMO_ACCOUNTS) {
     console.log(`  ${d.role.padEnd(8)} ${d.email} / ${d.password}`);
   }
+  console.log('\nFor the admin account, run: bun run scripts/admin-bootstrap.ts');
 }
 
 main()

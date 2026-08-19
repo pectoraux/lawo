@@ -107,6 +107,12 @@ model User {
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
+  // Invitation-token flow — replaces the admin-generated temp password.
+  // When set, status is WAITLISTED and passwordHash is null; the user
+  // completes the set-password flow at /?set_password=<TOKEN> to activate.
+  invitationToken      String?  @unique
+  invitationExpiresAt  DateTime?
+
   accounts Account[]
   sessions Session[]
 
@@ -115,6 +121,7 @@ model User {
 
   @@index([status])
   @@index([role])
+  @@index([invitationToken])
 }
 
 // NextAuth OAuth/credentials account linkage (kept for completeness; we use Credentials only).

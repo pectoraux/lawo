@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPackageRegistry } from '@/packages/registry/PackageRegistry';
 import { createRuleEngine } from '@/kernel/rules/RuleEngine';
+import { guardMutation } from '@/lib/auth/guards';
 import type { Fact } from '@/kernel/primitives/types';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,9 @@ interface EvaluateRequestBody {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await guardMutation(req);
+  if (guard) return guard;
+
   let body: EvaluateRequestBody;
   try {
     body = (await req.json()) as EvaluateRequestBody;

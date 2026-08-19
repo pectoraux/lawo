@@ -1,24 +1,35 @@
 /**
  * POST /api/waitlist/approve
- * Admin-only — promotes a waitlist entry to an ACTIVE user.
+ * Admin-only — promotes a waitlist entry to a user.
  *
- * Body: { entryId, role?, name?, sendInvite? }
+ * Body: { entryId, role?, name? }
  *   - role: defaults to USER. Admin can choose USER | OPERATOR | PACKAGER | ADMIN.
  *   - name: optional override of the requested name.
  *   - The new user is assigned a personal INDIVIDUAL tenant.
  *   - The waitlist entry is marked APPROVED with reviewer info.
  *
- * Returns: { user: { id, email, role }, temporaryPassword? }
+ * Returns:
+ *   {
+ *     user: { id, email, role, name },
+ *     invitationUrl: 'https://lawo.vercel.app/?set_password=<TOKEN>',
+ *     message: 'Account created. Deliver the invitation URL to the user out-of-band. The URL expires in 7 days.'
+ *   }
  *
- * NOTE: In v1 we generate a random 16-char password and return it ONCE. The
- * admin is expected to deliver it to the user out-of-band. A future email
- * integration would send it automatically.
+ * INVITATION-TOKEN FLOW (SEC-6): instead of generating a temp password, we
+ * issue a 32-byte hex invitation token valid for 7 days. The new user starts in
+ * WAITLISTED status with `passwordHash: null` — they cannot sign in until they
+ * complete the set-password flow at /?set_password=<TOKEN>. The token is NEVER
+ * returned separately, only inside the invitation URL.
+ *
+ * Rate-limited: 10 req/60s/IP (admin endpoint). CSRF-protected (Origin check).
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { randomBytes } from 'node:crypto';
 import { db } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth/session';
-import { hashPassword } from '@/lib/auth/password';
 import { recordAudit } from '@/lib/auth/audit';
+import { rateLimitFromRequest } from '@/lib/rate-limit';
+import { checkOrigin } from '@/lib/csrf';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,14 +39,30 @@ interface ApproveBody {
   name?: string;
 }
 
-function generateTempPassword(): string {
-  const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let out = '';
-  for (let i = 0; i < 16; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
-}
+const INVITATION_EXPIRES_DAYS = 7;
+// Canonical production URL — used to construct the invitation URL the admin
+// delivers to the user. Localhost URL is never exposed via this API (the
+// admin can derive it manually if needed for local dev).
+const PUBLIC_BASE_URL = 'https://lawo.vercel.app';
 
 export async function POST(req: NextRequest) {
+  // CSRF: reject cross-origin requests.
+  if (!checkOrigin(req)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  // Rate limit: 10 per 60s per IP (admin endpoint).
+  const rl = rateLimitFromRequest(req, 'waitlist-approve', { windowMs: 60_000, max: 10 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)) },
+      },
+    );
+  }
+
   const admin = await requireAdmin();
   if (!admin) {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
@@ -78,16 +105,22 @@ export async function POST(req: NextRequest) {
     data: { name: `Personal · ${entry.email}`, kind: 'INDIVIDUAL' },
   });
 
-  const tempPassword = generateTempPassword();
+  const token = randomBytes(32).toString('hex');
+  const invitationExpiresAt = new Date(Date.now() + INVITATION_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
+
   const user = await db.user.create({
     data: {
       email: entry.email,
       name: body.name?.trim() || entry.name || null,
-      passwordHash: hashPassword(tempPassword),
+      // INVITATION-TOKEN FLOW: no passwordHash; status WAITLISTED until the user
+      // completes the set-password flow at /?set_password=<TOKEN>.
+      passwordHash: null,
       role,
-      status: 'ACTIVE',
+      status: 'WAITLISTED',
       isDemo: false,
       tenantId: tenant.id,
+      invitationToken: token,
+      invitationExpiresAt,
     },
   });
 
@@ -106,12 +139,17 @@ export async function POST(req: NextRequest) {
     action: 'waitlist.approve',
     subjectId: user.id,
     severity: 'INFO',
+    // NOTE: do NOT include the token in the audit payload. The sanitizer in
+    // recordAudit would redact it, but defense-in-depth means we don't put it
+    // there in the first place.
     payload: { entryId: entry.id, email: user.email, role, name: user.name },
   });
 
+  const invitationUrl = `${PUBLIC_BASE_URL}/?set_password=${token}`;
+
   return NextResponse.json({
     user: { id: user.id, email: user.email, role: user.role, name: user.name },
-    temporaryPassword: tempPassword,
-    message: 'Account created. Deliver the temporary password to the user out-of-band.',
+    invitationUrl,
+    message: 'Account created. Deliver the invitation URL to the user out-of-band. The URL expires in 7 days.',
   });
 }

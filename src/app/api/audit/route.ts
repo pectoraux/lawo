@@ -4,10 +4,14 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { createDbAuditLog, createInMemoryAuditLog } from '@/platform/audit/AuditLog';
+import { guardAuthenticated } from '@/lib/auth/guards';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const guard = await guardAuthenticated();
+  if (guard) return guard;
+
   const url = new URL(req.url);
   const limitParam = url.searchParams.get('limit');
   const tenantId = url.searchParams.get('tenantId');

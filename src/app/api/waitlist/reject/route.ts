@@ -3,11 +3,15 @@
  * Admin-only — rejects a pending waitlist entry. Does NOT create a user.
  *
  * Body: { entryId, notes? }
+ *
+ * Rate-limited: 10 req/60s/IP. CSRF-protected (Origin check).
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth/session';
 import { recordAudit } from '@/lib/auth/audit';
+import { rateLimitFromRequest } from '@/lib/rate-limit';
+import { checkOrigin } from '@/lib/csrf';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +21,23 @@ interface RejectBody {
 }
 
 export async function POST(req: NextRequest) {
+  // CSRF: reject cross-origin requests.
+  if (!checkOrigin(req)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  // Rate limit: 10 per 60s per IP (admin endpoint).
+  const rl = rateLimitFromRequest(req, 'waitlist-reject', { windowMs: 60_000, max: 10 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)) },
+      },
+    );
+  }
+
   const admin = await requireAdmin();
   if (!admin) {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });

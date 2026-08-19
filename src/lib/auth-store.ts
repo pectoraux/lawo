@@ -51,7 +51,11 @@ interface AuthStore {
   pendingWaitlist: WaitlistEntry[];
   loadingWaitlist: boolean;
   approving: Record<string, boolean>;
-  tempPassword: { entryId: string; email: string; password: string } | null;
+  // Invitation-token flow (SEC-6) — replaces the temp-password pattern.
+  // The admin sees the invitation URL once and delivers it to the user
+  // out-of-band. The token is never stored client-side beyond this ephemeral
+  // state.
+  invitation: { entryId: string; email: string; invitationUrl: string } | null;
 
   // admin: users
   users: AdminUser[];
@@ -66,7 +70,7 @@ interface AuthStore {
   approveEntry: (entryId: string, role?: 'USER' | 'OPERATOR' | 'PACKAGER' | 'ADMIN') => Promise<void>;
   rejectEntry: (entryId: string, notes?: string) => Promise<void>;
   loadUsers: () => Promise<void>;
-  clearTempPassword: () => void;
+  clearInvitation: () => void;
 }
 
 export const useAuthStore = create<AuthStore>()(
@@ -79,7 +83,7 @@ export const useAuthStore = create<AuthStore>()(
     pendingWaitlist: [],
     loadingWaitlist: false,
     approving: {},
-    tempPassword: null,
+    invitation: null,
     users: [],
     loadingUsers: false,
 
@@ -240,21 +244,21 @@ export const useAuthStore = create<AuthStore>()(
         });
         const data = (await res.json()) as {
           user?: { email: string };
-          temporaryPassword?: string;
+          invitationUrl?: string;
           error?: string;
         };
         if (!res.ok) {
           throw new Error(data.error ?? `HTTP ${res.status}`);
         }
         toast.success(`Account created for ${data.user?.email}`, {
-          description: 'Temporary password shown below — deliver it to the user.',
+          description: 'Invitation URL shown below — deliver it to the user out-of-band.',
         });
-        if (data.temporaryPassword && data.user) {
+        if (data.invitationUrl && data.user) {
           set((s) => {
-            s.tempPassword = {
+            s.invitation = {
               entryId,
               email: data.user!.email,
-              password: data.temporaryPassword!,
+              invitationUrl: data.invitationUrl!,
             };
           });
         }
@@ -320,9 +324,9 @@ export const useAuthStore = create<AuthStore>()(
       }
     },
 
-    clearTempPassword: () => {
+    clearInvitation: () => {
       set((s) => {
-        s.tempPassword = null;
+        s.invitation = null;
       });
     },
   })),

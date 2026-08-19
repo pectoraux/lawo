@@ -6,6 +6,12 @@
  *   - Quick demo-login buttons for each role (guest/user/operator/packager/admin)
  *   - "Join the waitlist" form (sign-up)
  *
+ * Invitation-token flow (SEC-6):
+ *   - If the URL contains `?set_password=<TOKEN>`, render a SetPassword form
+ *     INSTEAD of the sign-in / waitlist / demo-logins surface. The user
+ *     completes the form → POST /api/set-password → on success, show a "Sign
+ *     in" button that clears the query param and reveals the auth gate.
+ *
  * When authenticated as admin:
  *   - Shows the WaitlistAdminPanel inline above the dashboard
  *
@@ -14,22 +20,23 @@
  */
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LogIn, LogOut, UserPlus, Loader2, ShieldCheck, Clock, X,
-  Check, AlertCircle, Sparkles, User as UserIcon,
+  Check, AlertCircle, Sparkles, User as UserIcon, Copy, KeyRound,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuthStore } from '@/lib/auth-store';
 import { DEMO_ACCOUNTS } from '@/lib/auth/demoAccounts';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 const ROLE_COLOR: Record<string, string> = {
   GUEST: 'bg-zinc-500/15 text-zinc-700 dark:text-zinc-300 border-zinc-500/30',
@@ -40,16 +47,42 @@ const ROLE_COLOR: Record<string, string> = {
 };
 
 export function AuthGate() {
+  return (
+    <Suspense fallback={<AuthGateFallback />}>
+      <AuthGateInner />
+    </Suspense>
+  );
+}
+
+function AuthGateFallback() {
+  return (
+    <div className="flex items-center justify-center gap-2 px-4 py-2 text-xs text-muted-foreground">
+      <Loader2 className="size-3 animate-spin" /> hydrating session…
+    </div>
+  );
+}
+
+function AuthGateInner() {
   const user = useAuthStore((s) => s.user);
   const loadingAuth = useAuthStore((s) => s.loadingAuth);
   const signOut = useAuthStore((s) => s.signOut);
+  const searchParams = useSearchParams();
+  const setPasswordToken = searchParams.get('set_password');
+
+  // If the user is already authenticated AND a set_password token is present,
+  // we ignore the token (an already-authenticated user has no business setting
+  // another password from this surface). This is rare but defensive.
+  const showSetPasswordForm = !user && !loadingAuth && typeof setPasswordToken === 'string' && setPasswordToken.length > 0;
 
   if (loadingAuth) {
-    return (
-      <div className="flex items-center justify-center gap-2 px-4 py-2 text-xs text-muted-foreground">
-        <Loader2 className="size-3 animate-spin" /> hydrating session…
-      </div>
-    );
+    return <AuthGateFallback />;
+  }
+
+  // Invitation-token set-password form takes precedence over the standard
+  // unauthenticated view. The token never appears in any rendered DOM text —
+  // we keep it in component state only for the POST.
+  if (showSetPasswordForm) {
+    return <SetPasswordView token={setPasswordToken} />;
   }
 
   if (!user) {
@@ -82,6 +115,159 @@ export function AuthGate() {
     </div>
   );
 }
+
+// =============================================================================
+// Invitation-token set-password view (SEC-6)
+// =============================================================================
+
+function SetPasswordView({ token }: { token: string }) {
+  const router = useRouter();
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const mismatch = confirm.length > 0 && password !== confirm;
+  const tooShort = password.length > 0 && password.length < 8;
+  const canSubmit = password.length >= 8 && confirm === password && !submitting;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (tooShort) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (mismatch) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/set-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string; email?: string };
+      if (!res.ok || !data.ok) {
+        setError(data.error ?? 'Failed to set password.');
+        return;
+      }
+      setSuccess(true);
+      toast.success('Password set — you can now sign in.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleSignInClick() {
+    // Clear the set_password query param and return to the standard auth gate.
+    router.replace('/');
+  }
+
+  if (success) {
+    return (
+      <Card className="mx-auto w-full max-w-md border-emerald-500/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Check className="size-4 text-emerald-600" aria-hidden />
+            Password set
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Your account is now active. Sign in with your email and the password you just set.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            type="button"
+            className="w-full gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
+            onClick={handleSignInClick}
+          >
+            <LogIn className="size-4" />
+            Sign in
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="mx-auto w-full max-w-md border-emerald-500/30">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <KeyRound className="size-4 text-emerald-600" aria-hidden />
+          Set your password
+        </CardTitle>
+        <CardDescription className="text-xs">
+          You were invited to Nomos. Choose a password (minimum 8 characters) to activate your account.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form className="space-y-3" onSubmit={handleSubmit}>
+          <div className="space-y-1">
+            <Label htmlFor="setpw-password" className="text-xs font-medium">New password</Label>
+            <Input
+              id="setpw-password"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="h-9 text-sm"
+              placeholder="••••••••"
+              aria-describedby="setpw-password-help"
+              aria-invalid={tooShort}
+            />
+            <p id="setpw-password-help" className="text-[10px] text-muted-foreground">
+              Minimum 8 characters.
+            </p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="setpw-confirm" className="text-xs font-medium">Confirm password</Label>
+            <Input
+              id="setpw-confirm"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              className="h-9 text-sm"
+              placeholder="••••••••"
+              aria-invalid={mismatch}
+            />
+            {mismatch && (
+              <p className="text-[10px] text-rose-600 dark:text-rose-400" role="alert">
+                Passwords do not match.
+              </p>
+            )}
+          </div>
+          {error && (
+            <div className="flex items-start gap-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-300" role="alert">
+              <AlertCircle className="mt-0.5 size-3 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+          <Button
+            type="submit"
+            disabled={!canSubmit}
+            className="w-full gap-2 bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600"
+          >
+            {submitting ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            {submitting ? 'Setting password…' : 'Set password & activate account'}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+// =============================================================================
+// Standard unauthenticated view (sign-in / waitlist / demo logins)
+// =============================================================================
 
 function UnauthenticatedView() {
   const [view, setView] = useState<'signin' | 'waitlist'>('signin');
@@ -181,7 +367,7 @@ function SignInForm() {
         />
       </div>
       {authError && (
-        <div className="flex items-start gap-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-300">
+        <div className="flex items-start gap-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-300" role="alert">
           <AlertCircle className="mt-0.5 size-3 shrink-0" />
           <span>{authError}</span>
         </div>
@@ -211,7 +397,7 @@ function WaitlistForm() {
         <div className="space-y-1">
           <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">You are on the waitlist</p>
           <p className="text-xs text-muted-foreground">
-            An administrator will review your request. When approved, you will receive an email with your temporary password.
+            An administrator will review your request. When approved, you will receive an invitation link to set your password.
           </p>
         </div>
         <Button variant="outline" size="sm" className="text-xs" onClick={() => { setSubmitted(false); setEmail(''); setName(''); setObjective(''); }}>
@@ -270,7 +456,7 @@ function WaitlistForm() {
       </Button>
       <p className="flex items-start gap-1 text-[10px] text-muted-foreground">
         <Clock className="mt-0.5 size-3 shrink-0" />
-        Your request is reviewed by an administrator. You will receive an email when your account is ready.
+        Your request is reviewed by an administrator. You will receive an invitation link to set your password when your account is ready.
       </p>
     </form>
   );
@@ -335,15 +521,32 @@ export function WaitlistAdminPanel() {
   const approving = useAuthStore((s) => s.approving);
   const approveEntry = useAuthStore((s) => s.approveEntry);
   const rejectEntry = useAuthStore((s) => s.rejectEntry);
-  const tempPassword = useAuthStore((s) => s.tempPassword);
-  const clearTempPassword = useAuthStore((s) => s.clearTempPassword);
+  const invitation = useAuthStore((s) => s.invitation);
+  const clearInvitation = useAuthStore((s) => s.clearInvitation);
   const [roleSelections, setRoleSelections] = useState<Record<string, 'USER' | 'OPERATOR' | 'PACKAGER' | 'ADMIN'>>({});
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (user?.role === 'ADMIN' && user.status === 'ACTIVE') {
       void loadPendingWaitlist();
     }
   }, [user, loadPendingWaitlist]);
+
+  // Stable callback so the eslint exhaustive-deps rule is satisfied.
+  const copyInvitation = useMemo(
+    () => async () => {
+      if (!invitation) return;
+      try {
+        await navigator.clipboard.writeText(invitation.invitationUrl);
+        setCopied(true);
+        toast.success('Invitation URL copied to clipboard.');
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        toast.error('Copy failed — copy the URL manually.');
+      }
+    },
+    [invitation],
+  );
 
   if (user?.role !== 'ADMIN' || user.status !== 'ACTIVE') return null;
 
@@ -355,24 +558,38 @@ export function WaitlistAdminPanel() {
           Admin — Waitlist ({pendingWaitlist.length} pending)
         </CardTitle>
         <CardDescription className="text-xs">
-          Approve waitlist entries to create ACTIVE user accounts. A temporary password is generated and shown ONCE — deliver it to the user out-of-band.
+          Approve waitlist entries to invite users. An invitation URL is generated and shown ONCE — deliver it to the user out-of-band. The URL expires in 7 days.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {tempPassword && (
+        {invitation && (
           <div className="mb-3 flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs">
             <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
             <div className="flex-1 space-y-1">
               <p className="font-semibold text-emerald-700 dark:text-emerald-300">Account created</p>
               <p className="font-mono text-[11px]">
-                email: <span className="font-semibold">{tempPassword.email}</span>
+                email: <span className="font-semibold">{invitation.email}</span>
               </p>
-              <p className="font-mono text-[11px]">
-                temporary password: <span className="rounded bg-background px-1.5 py-0.5 font-semibold text-emerald-700 dark:text-emerald-300">{tempPassword.password}</span>
-              </p>
-              <p className="text-[10px] text-muted-foreground">Copy this password now — it will not be shown again.</p>
+              <p className="text-[10px] text-muted-foreground">Invitation URL (expires in 7 days):</p>
+              <div className="flex items-center gap-1 rounded bg-background px-1.5 py-1">
+                <code className="flex-1 truncate font-mono text-[10px] text-emerald-700 dark:text-emerald-300">
+                  {invitation.invitationUrl}
+                </code>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-1.5 text-[10px]"
+                  onClick={() => void copyInvitation()}
+                  aria-label="Copy invitation URL to clipboard"
+                >
+                  {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground">Copy this URL now and deliver it to the user — it will not be shown again.</p>
             </div>
-            <Button variant="ghost" size="icon" className="size-6" onClick={clearTempPassword}>
+            <Button variant="ghost" size="icon" className="size-6" onClick={clearInvitation} aria-label="Dismiss invitation URL">
               <X className="size-3" />
             </Button>
           </div>

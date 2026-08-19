@@ -37,6 +37,10 @@ One markdown file per major subsystem. Each contract specifies Purpose, Inputs, 
 | `contracts/extension.md` | Extension SDK — capability-based permissions READ/WRITE/INVOKE/ACT_UPON | Foundation |
 | `contracts/tenant.md` | Tenant isolation — GLOBAL/TENANT/USER knowledge boundaries | Foundation |
 | `contracts/audit.md` | `AuditEvent` trail — immutable where appropriate | Foundation |
+| `contracts/entity.md` | `Entity` primitive — generic subject/actor in the system; referenced by `Fact.subjectId`, `ContextRequest.subjectId`, `StateSnapshot.subjectId` | Foundation |
+| `contracts/fact.md` | `Fact` primitive — typed observation about a subject; carries `truthLevel` end-to-end; substrate of provenance | Foundation |
+| `contracts/jurisdiction.md` | `Jurisdiction` primitive + `JurisdictionGraph` + the 11 relation types — graph model, not a hard-coded hierarchy | Foundation |
+| `contracts/rule-ir.md` | `RuleIR` primitive — canonical machine-readable rule representation; `ConditionNode` tree + `RuleEffect[]`; consumed by `RuleEngine` (see `contracts/rule.md`) | Foundation |
 
 ### Decisions (`decisions/`)
 
@@ -49,6 +53,12 @@ Architectural Decision Records (ADRs) follow the section 36 template. Old ADRs a
 | `decisions/0003-truth-model.md` | Adopts the T0–T5 truth/confidence hierarchy and the four rule types. |
 | `decisions/0004-jurisdiction-graph.md` | Jurisdictions are a graph, not a hard-coded hierarchy. |
 | `decisions/0005-package-registry.md` | Adopts the package manifest spec, four package categories, and the 10-point quality gate. |
+| `decisions/0006-postgresql-migration.md` | Migrates the data layer from SQLite to PostgreSQL (Neon) for Vercel serverless; native enums + Json columns + `DIRECT_URL` for migrations. |
+| `decisions/0007-nextauth-credentials.md` | Adopts NextAuth.js v4 with the Credentials provider + JWT session strategy (30-day maxAge); `authorize()` gates on `status=ACTIVE`. |
+| `decisions/0008-waitlist-approval-flow.md` | Adopts the `WaitlistEntry` model + admin approval flow; sign-up → PENDING → admin selects role → APPROVED → set-password → ACTIVE; personal `INDIVIDUAL` tenant per user. |
+| `decisions/0009-invitation-tokens.md` | Replaces admin-generated temporary passwords with an invitation-token + set-password flow; admin never handles user passwords. |
+| `decisions/0010-no-seed-endpoint.md` | Removes the `/api/seed-demo` endpoint; seeding is an explicit deployment operation (`scripts/seed-users.ts`) only. |
+| `decisions/0011-rate-limiting-and-csrf.md` | Adds in-memory rate limiting (per-instance) + Origin-header CSRF checks on all custom POST endpoints; documents the per-instance known limitation. |
 
 ### Schemas (`schemas/`)
 
@@ -61,6 +71,12 @@ Architectural Decision Records (ADRs) follow the section 36 template. Old ADRs a
 | Path | Description |
 | --- | --- |
 | `package-spec/manifest-spec.md` | The `PackageManifest` spec, four package categories, the 10-point quality gate, immutability-after-publication rule. |
+
+### Architecture tests (`architecture-tests/`)
+
+| Path | Description |
+| --- | --- |
+| `architecture-tests/run.ts` | The architecture verification suite (section 34). Runs in CI on every meaningful change. Each invariant I1–I18 in `invariants.md` is tagged **Machine-checkable: YES** or **NO** with the corresponding test name. The machine-checkable tests are: `kernel-imports-no-verticals` (I1, I2, I3), `kernel-imports-no-llm` (I5), `provenance-on-decisions` (I6), `temporal-metadata-on-rules` (I7), `package-dependency-rules` (I10), `packages-do-not-mutate-kernel` (I11), `no-feature-specific-hacks-in-kernel` (I16). |
 
 ### Fixtures (`fixtures/`)
 

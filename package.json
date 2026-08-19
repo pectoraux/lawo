@@ -11,7 +11,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
-    "seed": "bun run scripts/seed-users.ts"
+    "seed": "bun run scripts/seed-users.ts",
+    "arch-test": "bun run architecture/architecture-tests/run.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

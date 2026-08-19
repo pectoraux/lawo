@@ -6,11 +6,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPackageRegistry } from '@/packages/registry/PackageRegistry';
 import { createContextBuilder } from '@/intelligence/context/ContextBuilder';
+import { guardMutation } from '@/lib/auth/guards';
 import type { ContextRequest } from '@/kernel/primitives/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  const guard = await guardMutation(req);
+  if (guard) return guard;
+
   let body: ContextRequest;
   try {
     body = (await req.json()) as ContextRequest;

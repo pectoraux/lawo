@@ -55,3 +55,10 @@ server.log
 custom.db
 /db/
 start-dev*.sh
+
+# Local secrets / bootstrap tokens — never commit
+*.local
+.admin-bootstrap.local
+*.local
+*.admin-bootstrap.local
+tool-results/

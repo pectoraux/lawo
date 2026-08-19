@@ -35,6 +35,8 @@ if (rule.domain === 'insurance') { ... }
 
 **Test.** Architecture test `core-imports-no-vertical-modules`: scans kernel imports and source for forbidden tokens (`InsuranceClaim`, `ADU`, `HospitalAssistance`, `TrafficStop`, `AfCFTAShipment`) and forbidden predicates (`if (insurance)`, `if (border)`, `if (zoning)`, `if (healthcare)`).
 
+**Machine-checkable:** YES — `kernel-imports-no-verticals` (see architecture-tests/run.ts)
+
 ---
 
 ## I2. Country-specific logic lives in packages.
@@ -61,6 +63,8 @@ function applicableRules(country: string) {
 
 **Test.** Architecture tests `core-imports-no-vertical-modules` and `core-imports-no-domain-implementation` jointly verify no kernel module imports a package or a country-specific module; an additional scan rejects ISO country codes used as kernel identifiers.
 
+**Machine-checkable:** YES — `kernel-imports-no-verticals` (same test checks for country-specific code; see architecture-tests/run.ts)
+
 ---
 
 ## I3. Vertical-specific logic lives in packages.
@@ -75,6 +79,8 @@ function applicableRules(country: string) {
 
 **Test.** Architecture test `domain-packages-cannot-mutate-kernel-contracts` plus a structural scan confirming no kernel type extends with vertical-specific fields.
 
+**Machine-checkable:** YES — `kernel-imports-no-verticals` (same test checks for domain-specific code; see architecture-tests/run.ts)
+
 ---
 
 ## I4. Situation-specific logic lives in situation/procedure packages.
@@ -88,6 +94,8 @@ function applicableRules(country: string) {
 **Incorrect.** Hard-coding the `APPROACH → ORIGIN_EXIT → TRANSITION → DESTINATION_ENTRY → CUSTOMS → COMPLETION` flow inside the kernel.
 
 **Test.** Architecture test confirms kernel modules import no situation packs; kernel symbols do not include situation identifiers (`border_crossing`, `traffic_stop`, …).
+
+**Machine-checkable:** NO — situation packs are in packages; the check is structural (no situation identifiers in the kernel), not behavioral. Runtime verification of situation-engine behavior is out of scope for the static architecture test suite.
 
 ---
 
@@ -108,6 +116,8 @@ return { answer }; // no rule evaluation, no provenance
 
 **Test.** Architecture tests `provenance-on-decisions` and a static check that LLM client modules are not imported by rule/decision engines; all decision responses carry a non-null `Provenance[]`.
 
+**Machine-checkable:** YES — `kernel-imports-no-llm` (see architecture-tests/run.ts)
+
 ---
 
 ## I6. Every material decision has provenance.
@@ -121,6 +131,8 @@ return { answer }; // no rule evaluation, no provenance
 **Incorrect.** Persisting a snapshot without provenance "to save a column".
 
 **Test.** Architecture test `provenance-on-decisions` rejects any persisted decision snapshot whose `provenance` array is empty or whose entries omit required fields.
+
+**Machine-checkable:** YES — `provenance-on-decisions` (see architecture-tests/run.ts)
 
 ---
 
@@ -136,6 +148,8 @@ return { answer }; // no rule evaluation, no provenance
 
 **Test.** Architecture test `temporal-reproducibility` (a) rejects rules with missing `validFrom`/`version`, (b) replays a historical fixture at its original `as_of` and asserts identical output.
 
+**Machine-checkable:** YES — `temporal-metadata-on-rules` (temporal metadata exists on all rules; the static presence check is machine-verifiable; see architecture-tests/run.ts)
+
 ---
 
 ## I8. Community observations cannot masquerade as authority.
@@ -149,6 +163,8 @@ return { answer }; // no rule evaluation, no provenance
 **Incorrect.** Promoting a community-reported fee into `Obligation.amount` without a corresponding authoritative rule.
 
 **Test.** Architecture test that no `Rule` carries `truthLevel: 'T4'` or `'T5'`; no `Fact` with `truthLevel: 'T4'` or `'T5'` is referenced by a `Rule` at `truthLevel: 'T0'`/`'T1'` as if it were authoritative.
+
+**Machine-checkable:** NO — truth-level preservation is behavioral; runtime verification is required to confirm that no `T4`/`T5` fact is promoted to an authoritative obligation at decision time.
 
 ---
 
@@ -164,6 +180,8 @@ return { answer }; // no rule evaluation, no provenance
 
 **Test.** Architecture test `tenant-data-isolation` issues queries from a tenant context and asserts no other tenant's facts are returned; integration test confirms global retrieval does not include tenant-private facts.
 
+**Machine-checkable:** NO — tenant isolation is behavioral; runtime verification with real data is required to confirm that queries return only the caller's tenant's facts.
+
 ---
 
 ## I10. Packages are independently versioned and deployable.
@@ -177,6 +195,8 @@ return { answer }; // no rule evaluation, no provenance
 **Incorrect.** A monolithic deploy bundle that ships kernel + every package together with a single version.
 
 **Test.** Architecture test `package-dependency-rules` validates that each manifest declares its own `version` and that dependency `versionRange`s resolve against published manifests; rollback test confirms a single package can be rolled back without affecting others.
+
+**Machine-checkable:** YES — `package-dependency-rules` (see architecture-tests/run.ts)
 
 ---
 
@@ -192,6 +212,8 @@ return { answer }; // no rule evaluation, no provenance
 
 **Test.** Architecture test `domain-packages-cannot-mutate-kernel-contracts` rejects any package whose exported primitive shape diverges from the kernel's.
 
+**Machine-checkable:** YES — `packages-do-not-mutate-kernel` (see architecture-tests/run.ts)
+
 ---
 
 ## I12. Extensions cannot bypass capability permissions.
@@ -205,6 +227,8 @@ return { answer }; // no rule evaluation, no provenance
 **Incorrect.** A plugin calling `db.query('SELECT * FROM facts')` with no declared `READ` capability.
 
 **Test.** Architecture test `extensions-respect-capability-boundaries` runs each extension against a deny-by-default runtime and asserts no privileged call succeeds without the matching capability.
+
+**Machine-checkable:** NO — capability boundaries are behavioral; runtime verification with real extensions is required to confirm that no privileged call succeeds without the matching capability.
 
 ---
 
@@ -220,6 +244,8 @@ return { answer }; // no rule evaluation, no provenance
 
 **Test.** Architecture tests `historical-fixture-stability` and `temporal-reproducibility` replay committed fixtures and assert identical results; CI fails on any unflagged fixture diff.
 
+**Machine-checkable:** NO — historical reproducibility requires runtime verification; the test replays committed fixtures but cannot exhaustively verify all historical decisions across all package versions.
+
 ---
 
 ## I14. Production changes must preserve backward-compatible contracts unless explicitly versioned.
@@ -233,6 +259,8 @@ return { answer }; // no rule evaluation, no provenance
 **Incorrect.** `state: StateSnapshot` quietly becomes `state: StateSnapshotV2` with renamed fields and no migration note.
 
 **Test.** Architecture test `api-backwards-compatibility` runs the previous released contract test suite against the new build and rejects any regression that is not gated by an explicit version bump.
+
+**Machine-checkable:** NO — backwards compatibility requires contract diffing against the previous release; the static check can catch obvious renames but cannot exhaustively prove semantic equivalence.
 
 ---
 
@@ -248,6 +276,8 @@ return { answer }; // no rule evaluation, no provenance
 
 **Test.** CI step `architecture-docs-unchanged-since-aco` checks that any diff to `architecture/` is accompanied by a referenced ACO number; otherwise the build fails.
 
+**Machine-checkable:** NO — architecture change order is a process invariant; the CI step can detect missing ACO references but cannot verify the ACO process itself was followed.
+
 ---
 
 ## I16. No feature may introduce a new architectural primitive merely because it makes one feature easier.
@@ -261,6 +291,8 @@ return { answer }; // no rule evaluation, no provenance
 **Incorrect.** Adding a primitive to make one feature easier.
 
 **Test.** Architecture test `no-new-kernel-primitives-without-aco` rejects any new public type in `src/kernel/primitives/types.ts` not covered by an ACO.
+
+**Machine-checkable:** YES — `no-feature-specific-hacks-in-kernel` (see architecture-tests/run.ts)
 
 ---
 
@@ -276,6 +308,8 @@ return { answer }; // no rule evaluation, no provenance
 
 **Test.** Architecture test `no-duplicate-vertical-logic` flags large syntactic overlaps between packages and suggests promotion; CI surfaces the report for human review.
 
+**Machine-checkable:** NO — code duplication detection requires heuristic analysis; the syntactic-overlap scan can surface candidates but a human must decide whether they represent a real shared capability or coincidental similarity.
+
 ---
 
 ## I18. A hardening sprint may improve implementation but may not redefine architecture.
@@ -289,6 +323,8 @@ return { answer }; // no rule evaluation, no provenance
 **Incorrect.** Using a hardening sprint to ship a new primitive without an ACO.
 
 **Test.** CI step `architecture-diff-gate` fails the build when a sprint's diff touches `architecture/` or primitive types without an accompanying ACO; the test passes when only implementation files change.
+
+**Machine-checkable:** NO — process invariant; the CI step can detect unauthorized architecture diffs but cannot verify the spirit of "hardening, not redefining" is honoured.
 
 ---
 
