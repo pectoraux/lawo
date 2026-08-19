@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPackageRegistry } from '@/packages/registry/PackageRegistry';
 import { createRuleEngine } from '@/kernel/rules/RuleEngine';
-import { guardMutation } from '@/lib/auth/guards';
+import { requireUserWithScope } from '@/lib/auth/guards';
 import type { Fact } from '@/kernel/primitives/types';
 
 export const dynamic = 'force-dynamic';
@@ -21,8 +21,8 @@ interface EvaluateRequestBody {
 }
 
 export async function POST(req: NextRequest) {
-  const guard = await guardMutation(req);
-  if (guard) return guard;
+  const { user, response } = await requireUserWithScope(req);
+  if (response) return response;
 
   let body: EvaluateRequestBody;
   try {
@@ -61,5 +61,7 @@ export async function POST(req: NextRequest) {
     resolvedJurisdictions: applicableJurisdictions,
     evaluatedRuleCount: evaluations.length,
     evaluations,
+    // Echo the caller's tenant scope for client-side context (informational only).
+    tenantScope: user.tenantId,
   });
 }

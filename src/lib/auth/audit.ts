@@ -1,15 +1,19 @@
 /**
- * Audit helper — wraps the existing AuditLog with a sync-friendly signature
- * for use inside API routes. Records to the DB AuditEvent table; never throws.
+ * Audit helper — wraps the AuditLog with a sync-friendly signature
+ * for use inside API routes.
  *
- * PAYLOAD SANITIZER (SEC-9): before persisting, `recordAudit` deep-clones the
- * payload and replaces any key whose name matches `/password|token|secret|hash|credential/i`
- * with the string `'[REDACTED]'`. This prevents accidental logging of secrets
- * even if a caller includes them in the payload. The sanitizer is conservative:
- * it redacts on name, not value — so a payload like `{ emailHash: '...' }` is
- * also redacted, which is the safer failure mode for an audit log.
+ * DURABLE vs BEST-EFFORT:
+ *   - recordAudit()          — DURABLE. Throws on DB failure. Use for
+ *                               security-sensitive operations (waitlist approve,
+ *                               set-password, signin success/failure, privileged
+ *                               mutations). The caller should let the error
+ *                               propagate (aborting the action) or catch it
+ *                               and decide explicitly.
+ *   - recordAuditBestEffort() — NON-DURABLE. Swallows failures with a warning.
+ *                               Use for informational events (page views,
+ *                               decision.compute info).
  */
-import { createDbAuditLog } from '@/platform/audit/AuditLog';
+import { createDbAuditLog, AuditPersistenceError } from '@/platform/audit/AuditLog';
 
 export interface RecordAuditInput {
   tenantId?: string | null;
@@ -22,37 +26,59 @@ export interface RecordAuditInput {
 
 const SENSITIVE_KEY_RE = /password|token|secret|hash|credential/i;
 
-/**
- * Deep-clone `value` and replace any sensitive key (see SENSITIVE_KEY_RE) with
- * `'[REDACTED]'`. Returns a structural copy so the caller's payload is never
- * mutated. Handles plain objects and arrays; primitives are returned as-is.
- */
-function sanitizePayload<T>(value: T): T {
-  if (value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) {
-    return value.map((v) => sanitizePayload(v)) as unknown as T;
-  }
+function sanitize(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = SENSITIVE_KEY_RE.test(k) ? '[REDACTED]' : sanitizePayload(v);
+  for (const [k, v] of Object.entries(obj)) {
+    if (SENSITIVE_KEY_RE.test(k)) {
+      out[k] = '[REDACTED]';
+    } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+      out[k] = sanitize(v as Record<string, unknown>);
+    } else {
+      out[k] = v;
+    }
   }
-  return out as unknown as T;
+  return out;
 }
 
+/**
+ * DURABLE audit record. Throws AuditPersistenceError on DB failure.
+ * Use for security-sensitive operations where the audit trail MUST persist
+ * or the action should not be considered complete.
+ */
 export async function recordAudit(input: RecordAuditInput): Promise<void> {
+  const auditLog = createDbAuditLog();
+  const sanitizedPayload = sanitize(input.payload);
+  await auditLog.record({
+    tenantId: input.tenantId ?? null,
+    actor: input.actor,
+    action: input.action,
+    subjectId: input.subjectId,
+    severity: input.severity,
+    payload: sanitizedPayload,
+  });
+}
+
+/**
+ * BEST-EFFORT audit record. Never throws — on DB failure, logs a warning and
+ * returns a synthesized non-durable event. Use for informational events only.
+ */
+export async function recordAuditBestEffort(input: RecordAuditInput): Promise<void> {
   try {
     const auditLog = createDbAuditLog();
-    await auditLog.record({
+    const sanitizedPayload = sanitize(input.payload);
+    await auditLog.recordBestEffort({
       tenantId: input.tenantId ?? null,
       actor: input.actor,
       action: input.action,
       subjectId: input.subjectId,
       severity: input.severity,
-      payload: sanitizePayload(input.payload),
+      payload: sanitizedPayload,
     });
   } catch (err) {
-    // Audit failures must not break the request flow.
-    console.warn('[audit] record failed:', err instanceof Error ? err.message : err);
+    // recordBestEffort already handles failures internally; this catch is a
+    // belt-and-suspenders for any unexpected throw.
+    console.warn('[audit] best-effort record failed:', err instanceof Error ? err.message : err);
   }
 }
 
+export { AuditPersistenceError };

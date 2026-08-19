@@ -59,6 +59,11 @@ Architectural Decision Records (ADRs) follow the section 36 template. Old ADRs a
 | `decisions/0009-invitation-tokens.md` | Replaces admin-generated temporary passwords with an invitation-token + set-password flow; admin never handles user passwords. |
 | `decisions/0010-no-seed-endpoint.md` | Removes the `/api/seed-demo` endpoint; seeding is an explicit deployment operation (`scripts/seed-users.ts`) only. |
 | `decisions/0011-rate-limiting-and-csrf.md` | Adds in-memory rate limiting (per-instance) + Origin-header CSRF checks on all custom POST endpoints; documents the per-instance known limitation. |
+| `decisions/0012-tenant-authorization-boundary.md` | Every authenticated API route derives the effective tenant scope from the authenticated session, not from client-supplied `tenantId` / `subjectId` query params; admins get platform-wide read access only via explicit `?platformWide=true`. |
+| `decisions/0013-decision-integrity-separation.md` | Separates `DecisionRequest` (client input) from `DecisionRecord` (server-authored output); `POST /api/decisions` is removed — `POST /api/state` with `persist: true` is the only persist path; authoritative fields (`truthLevel`, `provenance`, `state`, `computedAt`) are always engine-generated. |
+| `decisions/0014-audit-durability-policy.md` | Splits audit recording into durable `record()` (throws on DB failure; security-sensitive actions roll back on failure) and best-effort `recordBestEffort()` (synthesized non-durable event on failure; informational events only). |
+| `decisions/0015-identity-source-of-truth.md` | Deletes the legacy `src/platform/identity/Identity.ts` stub; the NextAuth session backed by the `User` table is the single authoritative identity source; demo quick-login buttons use `DEMO_ACCOUNTS` (UI concern). |
+| `decisions/0016-rate-limit-store-abstraction.md` | Abstracts rate limiting behind a `RateLimitStore` interface with `InMemoryRateLimitStore` (per-instance, NOT production-grade) and `SharedRateLimitStore` (stub for future Redis/Upstash); `RATE_LIMIT_ALLOW_IN_MEMORY` acknowledges the limitation. |
 
 ### Schemas (`schemas/`)
 
@@ -77,6 +82,7 @@ Architectural Decision Records (ADRs) follow the section 36 template. Old ADRs a
 | Path | Description |
 | --- | --- |
 | `architecture-tests/run.ts` | The architecture verification suite (section 34). Runs in CI on every meaningful change. Each invariant I1–I18 in `invariants.md` is tagged **Machine-checkable: YES** or **NO** with the corresponding test name. The machine-checkable tests are: `kernel-imports-no-verticals` (I1, I2, I3), `kernel-imports-no-llm` (I5), `provenance-on-decisions` (I6), `temporal-metadata-on-rules` (I7), `package-dependency-rules` (I10), `packages-do-not-mutate-kernel` (I11), `no-feature-specific-hacks-in-kernel` (I16). |
+| `architecture-tests/CATEGORIES.md` | Distinguishes the two categories of architecture tests — static boundary tests (source-structure checks in `run.ts`) and runtime invariant tests (behavioral checks in `tests/runtime-security/run.ts`). A PR is not mergeable unless BOTH suites pass. See "Test Categories" below. |
 
 ### Fixtures (`fixtures/`)
 
@@ -130,6 +136,20 @@ The following are hard invariants. Violations require either rejecting the chang
 - **I16.** No feature may introduce a new architectural primitive merely because it makes one feature easier.
 - **I17.** Repeated code across verticals is evidence to improve the kernel or create a shared capability, not evidence to duplicate vertical logic.
 - **I18.** A hardening sprint may improve implementation but may not redefine architecture.
+
+---
+
+## Test Categories
+
+The Nomos architecture test suite has **two categories**. "All tests passing" requires BOTH to pass. See `architecture-tests/CATEGORIES.md` for the full breakdown.
+
+1. **Static Boundary Tests** (`architecture/architecture-tests/run.ts`, `bun run arch-test`, <100 ms) — source-structure checks: kernel imports, code patterns, route-handler signatures. These catch architectural **DRIFT**. 14 checks (I1, I2, I3, I5, I6, I7, I10, I11, I16, AUTHZ, SEC × 4).
+
+2. **Runtime Invariant Tests** (`tests/runtime-security/run.ts`, `bun run runtime-test`, requires a running dev server on `localhost:3000`, ~10–30 s) — behavioral checks with real sessions: tenant isolation, decision integrity, audit authorization, CSRF enforcement, rate limiting. These catch **AUTHORIZATION GAPS** that static tests cannot detect. 15 checks (AUTHZ-001 through AUTHZ-008, INTEGRITY-001 through INTEGRITY-003, WAITLIST-001/002, SETPW-001/002).
+
+**Why both are required.** A route can have a guard call in its source (static pass) but still accept a client-supplied `tenantId` (runtime fail). The authorization sprint's gap — `/api/decisions` and `/api/audit` accepting arbitrary `tenantId`/`subjectId` from the client — passed the static suite (the guard was present) and failed the runtime suite (the data-access layer trusted the client). See ADRs 0012 and 0013 for the gap and the fix.
+
+**CI integration.** Both suites must pass on every PR touching `src/kernel/`, `src/intelligence/`, `src/procedures/`, `src/situations/` (static), `src/app/api/`, `src/lib/auth/`, `src/platform/` (static + runtime), or `prisma/schema.prisma` (runtime — schema changes can affect tenant scoping).
 
 ---
 

@@ -55,7 +55,6 @@ export interface OrientResponse {
   planes: { id: string; label: string; description: string }[];
   ruleTypes: { code: string; label: string; description: string }[];
   truthLevels: { code: TruthLevel; label: string; description: string }[];
-  identities: Array<{ id: string; role: string; tenantId: string | null; label: string }>;
 }
 
 export interface DemoPresetFact {

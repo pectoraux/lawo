@@ -1,14 +1,19 @@
 /**
  * GET /api/orient
  * Returns the orientation overview — the entry point for the consumer UI.
- * Lists situations, packages, jurisdiction tree, planes, identities, rule types,
+ * Lists situations, packages, jurisdiction tree, planes, rule types,
  * truth levels, and demo presets. Domain-neutral (no vertical logic).
+ *
+ * NOTE: Identity is NOT included. The authoritative identity source is the
+ * NextAuth session (DB-backed User table). The demo quick-login buttons in
+ * the AuthGate use DEMO_ACCOUNTS from src/lib/auth/demoAccounts.ts directly —
+ * that is a UI concern, not a platform concern. There is no duplicate identity
+ * system (Phase 5 of the authorization sprint removed Identity.ts).
  */
 import { NextResponse } from 'next/server';
 import { createPackageRegistry } from '@/packages/registry/PackageRegistry';
-import { demoIdentities } from '@/platform/identity/Identity';
 import { TRUTH_LEVELS, TRUTH_LABEL, TRUTH_DESCRIPTION } from '@/kernel/truth/truth';
-import type { PackageManifest, Situation, Jurisdiction, JurisdictionEdge, Authority, Source, Rule } from '@/kernel/primitives/types';
+import type { PackageManifest, Situation, Jurisdiction, JurisdictionEdge, Authority, Source, Rule, Action, Procedure } from '@/kernel/primitives/types';
 
 export const dynamic = 'force-static';
 
@@ -25,7 +30,6 @@ export function GET() {
   const actions = registry.listActions();
   const procedures = registry.listProcedures();
 
-  // Minimal UI hint for each plane (architecture §2)
   const planes = [
     { id: 'experience', label: 'Experience Plane', description: 'Consumer / business / enterprise clients, web, mobile, API, conversational UI.' },
     { id: 'intelligence', label: 'Intelligence Plane', description: 'Context construction, state engine, rule engine, decision, optimization, agent runtime.' },
@@ -60,7 +64,6 @@ export function GET() {
     planes,
     ruleTypes,
     truthLevels,
-    identities: demoIdentities,
   };
 
   return NextResponse.json(response);
@@ -89,10 +92,9 @@ interface OrientResponse {
   authorities: Authority[];
   sources: Source[];
   rules: ReturnType<typeof stripRuleForListing>[];
-  actions: ReturnType<typeof Array.from> extends never ? never : import('@/kernel/primitives/types').Action[];
-  procedures: import('@/kernel/primitives/types').Procedure[];
+  actions: Action[];
+  procedures: Procedure[];
   planes: { id: string; label: string; description: string }[];
   ruleTypes: { code: string; label: string; description: string }[];
   truthLevels: { code: string; label: string; description: string }[];
-  identities: import('@/platform/identity/Identity').Identity[];
 }

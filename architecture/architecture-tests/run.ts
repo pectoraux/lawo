@@ -938,7 +938,10 @@ function checkPrivilegedRoutesAuthz(): CheckResult {
         /\bcheckOrigin\s*\(/.test(src) ||
         /\bguardMutation\s*\(/.test(src) ||
         /\bguardAdminMutation\s*\(/.test(src) ||
-        /\bguardAuthenticated\s*\(/.test(src);
+        /\bguardAuthenticated\s*\(/.test(src) ||
+        /\brequireUserWithScope\s*\(/.test(src) ||
+        /\brequireAdminWithScope\s*\(/.test(src) ||
+        /\brequireUserAuthenticated\s*\(/.test(src);
       if (!hasAuthz) {
         violations.push(
           `${relPath}: ${method} handler on '${info.routePath}' has no authz call (requireAdmin/requireUser/getSession/checkOrigin)`,
@@ -1084,7 +1087,9 @@ function checkCsrfOnMutations(): CheckResult {
     const hasCheckOrigin =
       /\bcheckOrigin\s*\(/.test(src) ||
       /\bguardMutation\s*\(/.test(src) ||
-      /\bguardAdminMutation\s*\(/.test(src);
+      /\bguardAdminMutation\s*\(/.test(src) ||
+      /\brequireUserWithScope\s*\(/.test(src) ||
+      /\brequireAdminWithScope\s*\(/.test(src);
     if (!hasCheckOrigin) {
       violations.push(
         `${relative(ROOT, file)}: POST handler on '${info.routePath}' does not call checkOrigin()`,

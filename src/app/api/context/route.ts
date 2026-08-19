@@ -6,14 +6,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPackageRegistry } from '@/packages/registry/PackageRegistry';
 import { createContextBuilder } from '@/intelligence/context/ContextBuilder';
-import { guardMutation } from '@/lib/auth/guards';
+import { requireUserWithScope } from '@/lib/auth/guards';
 import type { ContextRequest } from '@/kernel/primitives/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
-  const guard = await guardMutation(req);
-  if (guard) return guard;
+  const { user, response } = await requireUserWithScope(req);
+  if (response) return response;
 
   let body: ContextRequest;
   try {
@@ -31,7 +31,9 @@ export async function POST(req: NextRequest) {
 
   const registry = createPackageRegistry();
   const contextBuilder = createContextBuilder();
-  const bundle = contextBuilder.build(body, registry);
+  // Override tenantId with the session's tenant — never trust the client.
+  const scopedRequest: ContextRequest = { ...body, tenantId: user.tenantId };
+  const bundle = contextBuilder.build(scopedRequest, registry);
 
   return NextResponse.json(bundle);
 }

@@ -102,14 +102,35 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  await recordAudit({
-    tenantId: user.tenantId,
-    actor: user.email,
-    action: 'auth.set_password',
-    subjectId: user.id,
-    severity: 'INFO',
-    payload: { email: user.email },
-  });
+  // DURABLE audit: account activation is a security-sensitive operation.
+  // If the audit write fails, roll back the activation so the event is never
+  // un-audited. The user will see an error and can retry.
+  try {
+    await recordAudit({
+      tenantId: user.tenantId,
+      actor: user.email,
+      action: 'auth.set_password',
+      subjectId: user.id,
+      severity: 'INFO',
+      payload: { email: user.email },
+    });
+  } catch (auditErr) {
+    // Roll back the activation.
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: null,
+        status: 'WAITLISTED',
+        invitationToken: token,
+        invitationExpiresAt: user.invitationExpiresAt,
+      },
+    }).catch(() => {});
+    console.error('[set-password] audit persistence failed — rolled back activation:', auditErr);
+    return NextResponse.json(
+      { error: 'Account activation failed due to an audit error. Please retry.' },
+      { status: 500 },
+    );
+  }
 
   return NextResponse.json({ ok: true, email: user.email });
 }

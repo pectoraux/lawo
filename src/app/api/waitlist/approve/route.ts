@@ -133,17 +133,37 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  await recordAudit({
-    tenantId: admin.tenantId,
-    actor: admin.email,
-    action: 'waitlist.approve',
-    subjectId: user.id,
-    severity: 'INFO',
-    // NOTE: do NOT include the token in the audit payload. The sanitizer in
-    // recordAudit would redact it, but defense-in-depth means we don't put it
-    // there in the first place.
-    payload: { entryId: entry.id, email: user.email, role, name: user.name },
-  });
+  // DURABLE audit: this is a security-sensitive privileged operation.
+  // If the audit write fails, the action must be considered incomplete —
+  // we roll back the user creation. The audit trail MUST be durable for
+  // privileged mutations (architecture §25, §35).
+  try {
+    await recordAudit({
+      tenantId: admin.tenantId,
+      actor: admin.email,
+      action: 'waitlist.approve',
+      subjectId: user.id,
+      severity: 'INFO',
+      // NOTE: do NOT include the token in the audit payload. The sanitizer in
+      // recordAudit would redact it, but defense-in-depth means we don't put it
+      // there in the first place.
+      payload: { entryId: entry.id, email: user.email, role, name: user.name },
+    });
+  } catch (auditErr) {
+    // Audit persistence failed. Roll back the user creation to avoid an
+    // un-audited privileged mutation. The admin will see a 500 error and
+    // can retry; the waitlist entry remains APPROVED but the user record is gone.
+    await db.user.delete({ where: { id: user.id } }).catch(() => {});
+    await db.waitlistEntry.update({
+      where: { id: entry.id },
+      data: { status: 'PENDING', reviewedAt: null, reviewedById: null },
+    }).catch(() => {});
+    console.error('[waitlist.approve] audit persistence failed — rolled back user creation:', auditErr);
+    return NextResponse.json(
+      { error: 'Audit persistence failed — the approval was rolled back. Please retry.' },
+      { status: 500 },
+    );
+  }
 
   const invitationUrl = `${PUBLIC_BASE_URL}/?set_password=${token}`;
 

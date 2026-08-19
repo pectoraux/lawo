@@ -467,6 +467,14 @@ function DemoLogins() {
   const signingIn = useAuthStore((s) => s.signingIn);
   const [busy, setBusy] = useState<string | null>(null);
 
+  // Demo quick-login is hidden in production unless explicitly enabled via
+  // NEXT_PUBLIC_DEMO_AUTH_ENABLED=true. This prevents shipping publicly visible
+  // quick-login credentials into production by default.
+  const demoEnabled = process.env.NEXT_PUBLIC_DEMO_AUTH_ENABLED === 'true';
+  if (!demoEnabled) {
+    return null;
+  }
+
   return (
     <div className="space-y-2 rounded-md border border-violet-500/20 bg-violet-500/5 p-3">
       <div className="flex items-center gap-1.5">
