@@ -1,0 +1,490 @@
+     1→# Nomos — Universal Rules-and-Reality Operating System
+     2→
+     3→## Project Identity
+     4→
+     5→- **Name**: Nomos (from Greek: law / custom / order)
+     6→- **Tagline**: A universal rules-and-reality operating system
+     7→- **Stack**: Next.js 16 + TypeScript 5 + Tailwind 4 + shadcn/ui + Prisma (SQLite) + Zustand
+     8→- **Single user-visible route**: `/`
+     9→
+    10→## Frozen Architecture (see architecture/)
+    11→
+    12→The platform is built on a frozen architecture with 5 planes:
+    13→- A. Experience Plane (consumer UI)
+    14→- B. Intelligence Plane (context/state/rule/decision engines)
+    15→- C. Knowledge Plane (entity/fact/jurisdiction/rule graphs)
+    16→- D. Execution Plane (integrations/actions)
+    17→- E. Platform Foundation (tenancy/identity/audit)
+    18→
+    19→The kernel is **domain-agnostic**. Vertical behavior lives in packages.
+    20→
+    21→## Shared TypeScript Contract Surface (CRITICAL — all subagents MUST follow these exact types)
+    22→
+    23→All kernel primitives are defined in `src/kernel/primitives/types.ts`. Engines are in `src/kernel/<subsystem>/`. The contract surfaces below are FROZEN — implement against them, do not redefine.
+    24→
+    25→### Kernel primitives (`src/kernel/primitives/types.ts`)
+    26→
+    27→```typescript
+    28→// ===== Truth / Confidence Model (T0–T5) =====
+    29→export type TruthLevel = 'T0' | 'T1' | 'T2' | 'T3' | 'T4' | 'T5';
+    30→// T0 authoritative, T1 deterministically derived, T2 established interpretation,
+    31→// T3 expert interpretation, T4 community observation, T5 prediction
+    32→
+    33→export type RuleType = 'DETERMINISTIC' | 'CONDITIONAL' | 'DISCRETIONARY' | 'PREDICTIVE';
+    34→
+    35→export type ObservationStatus = 'OFFICIAL' | 'VERIFIED' | 'COMMUNITY_REPORTED' | 'UNVERIFIED' | 'PREDICTED';
+    36→
+    37→// ===== Temporal Model =====
+    38→export interface TemporalRange {
+    39→  validFrom: string;       // ISO date
+    40→  validTo?: string | null; // ISO date or null = open-ended
+    41→  publishedAt?: string;
+    42→  ingestedAt?: string;
+    43→  version: number;
+    44→  supersedes?: string | null;
+    45→  supersededBy?: string | null;
+    46→}
+    47→
+    48→// ===== Provenance =====
+    49→export interface Provenance {
+    50→  decisionId: string;
+    51→  ruleId: string;
+    52→  ruleVersion: number;
+    53→  source: SourceRef;
+    54→  authority: AuthorityRef;
+    55→  facts: FactRef[];
+    56→  evidence: EvidenceRef[];
+    57→  calculation: CalculationStep[];
+    58→  assumptions: string[];
+    59→  truthLevel: TruthLevel;
+    60→  asOf: string;             // ISO date — the "evaluate as_of" anchor
+    61→  producedAt: string;       // ISO timestamp
+    62→}
+    63→
+    64→export interface SourceRef { sourceId: string; citation: string; url?: string; }
+    65→export interface AuthorityRef { authorityId: string; name: string; jurisdictionId: string; }
+    66→export interface FactRef { factId: string; subjectId: string; attribute: string; value: unknown; truthLevel: TruthLevel; }
+    67→export interface EvidenceRef { evidenceId: string; documentId?: string; page?: number; region?: string; }
+    68→export interface CalculationStep { description: string; input: unknown; output: unknown; ruleClause?: string; }
+    69→
+    70→// ===== Kernel Primitives =====
+    71→export interface Entity { id: string; type: string; label: string; tenantId: string | null; attributes?: Record<string, unknown>; }
+    72→export interface Fact {
+    73→  id: string; subjectId: string; attribute: string; value: unknown;
+    74→  truthLevel: TruthLevel; source?: SourceRef; observedAt: string;
+    75→  tenantId: string | null; jurisdictionId?: string;
+    76→}
+    77→export interface Jurisdiction {
+    78→  id: string; code: string; name: string; kind: 'COUNTRY' | 'REGION' | 'STATE' | 'MUNICIPALITY' | 'REGULATOR' | 'COURT' | 'SPECIAL_ZONE' | 'FREE_ZONE' | 'SUPRANATIONAL' | 'BILATERAL' | 'INTERNATIONAL';
+    79→  parentIds: string[]; temporal: TemporalRange;
+    80→}
+    81→export interface JurisdictionEdge { fromId: string; toId: string; relation: JurisdictionRelation; }
+    82→export type JurisdictionRelation = 'APPLIES_TO' | 'OVERRIDES' | 'PREEMPTS' | 'IMPLEMENTS' | 'DERIVES_FROM' | 'MODIFIES' | 'EXEMPTS' | 'REFERENCES' | 'SUPERSEDES' | 'INTERPRETS' | 'CONDITIONAL_ON';
+    83→export interface Authority { id: string; name: string; jurisdictionId: string; kind: 'LEGISLATURE' | 'EXECUTIVE' | 'JUDICIARY' | 'REGULATOR' | 'INTERNATIONAL_BODY' | 'CUSTOMS' | 'IMMIGRATION' | 'TAX' | 'OTHER'; }
+    84→export interface Source { id: string; title: string; citation: string; url?: string; authorityId: string; publishedAt?: string; }
+    85→export interface Rule {
+    86→  id: string; code: string; title: string; jurisdictionId: string; authorityId: string; sourceId: string;
+    87→  type: RuleType; ruleIr: RuleIR; temporal: TemporalRange; packageId: string; truthLevel: TruthLevel;
+    88→}
+    89→export interface RuleIR {
+    90→  id: string; ruleId: string;
+    91→  conditions: ConditionNode;          // boolean expression tree over facts
+    92→  exceptions: ConditionNode[];         // if any true, rule does not apply
+    93→  effects: RuleEffect[];              // rights/obligations/permissions/restrictions granted/denied
+    94→  definitions?: Record<string, Definition>;
+    95→  references?: string[];              // sourceId refs
+    96→  interpretiveStatus?: 'SETTLED' | 'CONTESTED' | 'AMBIGUOUS';
+    97→}
+    98→export type ConditionNode =
+    99→  | { kind: 'leaf'; fact: string; operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'contains' | 'exists'; value: unknown }
+   100→  | { kind: 'and'; children: ConditionNode[] }
+   101→  | { kind: 'or'; children: ConditionNode[] }
+   102→  | { kind: 'not'; child: ConditionNode };
+   103→export type EffectKind = 'RIGHT' | 'OBLIGATION' | 'PERMISSION' | 'RESTRICTION' | 'FEE' | 'OPTION' | 'CONSEQUENCE';
+   104→export interface RuleEffect { kind: EffectKind; code: string; label: string; detail?: string; amount?: { value: number; currency: string; basis?: string }; }
+   105→export interface Definition { term: string; meaning: string; }
+   106→
+   107→// ===== State =====
+   108→export interface StateSnapshot {
+   109→  situationId: string; subjectId: string; jurisdictionIds: string[];
+   110→  asOf: string; computedAt: string;
+   111→  applicableRules: Rule[]; firedEffects: FiredEffect[]; options: Option[]; obligations: Obligation[]; rights: Right[]; permissions: Permission[]; restrictions: Restriction[];
+   112→  truthLevel: TruthLevel;
+   113→  provenance: Provenance[];
+   114→}
+   115→export interface FiredEffect { ruleId: string; effect: RuleEffect; truthLevel: TruthLevel; }
+   116→export interface Option { id: string; code: string; label: string; detail?: string; preconditions?: ConditionNode; actionId?: string; }
+   117→export interface Obligation { id: string; code: string; label: string; dueBy?: string; authorityId: string; }
+   118→export interface Right { id: string; code: string; label: string; }
+   119→export interface Permission { id: string; code: string; label: string; }
+   120→export interface Restriction { id: string; code: string; label: string; }
+   121→
+   122→// ===== Situations & Procedures =====
+   123→export interface SituationState { id: string; label: string; description?: string; isTerminal?: boolean; }
+   124→export interface SituationTransition { from: string; to: string; event: string; requiredFacts?: string[]; preconditions?: ConditionNode; }
+   125→export interface Situation {
+   126→  id: string; code: string; label: string; description: string; packageId: string;
+   127→  entryConditions: ConditionNode; states: SituationState[]; transitions: SituationTransition[];
+   128→  requiredFacts: string[]; applicableDomains: string[]; actors: string[];
+   129→  procedures: string[]; possibleActions: string[]; exitConditions: ConditionNode; exceptionPaths?: string[];
+   130→}
+   131→export interface ProcedureStep {
+   132→  id: string; code: string; label: string; description?: string;
+   133→  requiredDocuments?: string[]; acceptedAlternatives?: string[]; expectedOutputs?: string[];
+   134→  fees?: { label: string; amount: number; currency: string }[]; timing?: string; nextStep?: string; exceptionPath?: string;
+   135→}
+   136→export interface Procedure { id: string; code: string; label: string; situationId: string; steps: ProcedureStep[]; }
+   137→
+   138→// ===== Actions =====
+   139→export interface Action {
+   140→  id: string; code: string; label: string; description?: string; kind: 'FILE' | 'PAY' | 'NOTIFY' | 'NAVIGATE' | 'SUBMIT' | 'GENERATE_DOCUMENT' | 'REQUEST_INFO' | 'REPORT' | 'HANDOFF';
+   141→  preconditions?: ConditionNode; executionHint?: string; expectedResult?: string;
+   142→}
+   143→
+   144→// ===== Packages =====
+   145→export type PackageCategory = 'JURISDICTION' | 'DOMAIN' | 'SITUATION' | 'CAPABILITY';
+   146→export interface PackageManifest {
+   147→  packageId: string; name: string; version: string; category: PackageCategory;
+   148→  dependencies: { packageId: string; versionRange: string }[];
+   149→  supportedJurisdictions: string[]; domains: string[]; situations: string[]; capabilities: string[];
+   150→  sources: string[]; rules: string[]; procedures: string[]; actions: string[]; schemas: string[];
+   151→  testFixtures: string[]; verificationMetadata: { signedBy: string; signedAt: string; hash: string };
+   152→  description: string;
+   153→}
+   154→
+   155→// ===== Evidence =====
+   156→export interface Document { id: string; type: string; title: string; tenantId: string | null; pages?: number; }
+   157→export interface Evidence { id: string; documentId?: string; page?: number; region?: string; extractedFactIds: string[]; confidence: number; }
+   158→
+   159→// ===== Context =====
+   160→export interface ContextRequest {
+   161→  subjectId: string; locationId?: string; asOf: string; situationId?: string;
+   162→  facts: Fact[]; jurisdictionIds: string[]; objective?: string; tenantId: string | null;
+   163→}
+   164→export interface ContextBundle {
+   165→  request: ContextRequest; resolvedJurisdictions: Jurisdiction[]; resolvedAuthorities: Authority[];
+   166→  applicableRules: Rule[]; evidence: Evidence[]; sources: Source[];
+   167→}
+   168→
+   169→// ===== Audit =====
+   170→export interface AuditEvent {
+   171→  id: string; tenantId: string | null; actor: string; action: string; subjectId?: string;
+   172→  timestamp: string; severity: 'INFO' | 'WARN' | 'ERROR' | 'CRITICAL'; payload: Record<string, unknown>;
+   173→}
+   174→
+   175→// ===== Tenant =====
+   176→export interface Tenant { id: string; name: string; kind: 'INDIVIDUAL' | 'HOUSEHOLD' | 'SMALL_BUSINESS' | 'ENTERPRISE' | 'PROFESSIONAL_ORG' | 'GOVERNMENT' | 'EMBEDDED'; createdAt: string; }
+   177→```
+   178→
+   179→### Engine function signatures (FROZEN)
+   180→
+   181→```typescript
+   182→// src/kernel/jurisdiction/JurisdictionGraph.ts
+   183→export interface JurisdictionGraph {
+   184→  add(j: Jurisdiction): void; addEdge(e: JurisdictionEdge): void;
+   185→  get(id: string): Jurisdiction | undefined;
+   186→  ancestors(id: string): Jurisdiction[];           // APPLIES_TO / DERIVES_FROM traversal
+   187→  descendants(id: string): Jurisdiction[];
+   188→  applicableFor(jurisdictionIds: string[], asOf: string): Jurisdiction[]; // returns jurisdictions whose temporal range covers asOf and are reachable
+   189→  relations(id: string): JurisdictionEdge[];
+   190→}
+   191→
+   192→// src/kernel/rules/RuleEngine.ts
+   193→export interface RuleEvaluationResult { ruleId: string; matched: boolean; skippedDueToException: boolean; firedEffects: RuleEffect[]; truthLevel: TruthLevel; calculation: CalculationStep[]; }
+   194→export interface RuleEngine {
+   195→  evaluate(rule: Rule, facts: Fact[], asOf: string): RuleEvaluationResult;
+   196→  evaluateAll(rules: Rule[], facts: Fact[], asOf: string): RuleEvaluationResult[];
+   197→}
+   198→
+   199→// src/kernel/state/StateEngine.ts
+   200→export interface StateEngine {
+   201→  compute(bundle: ContextBundle, situation: Situation | undefined, rules: Rule[], ruleEngine: RuleEngine): StateSnapshot;
+   202→}
+   203→
+   204→// src/kernel/provenance/ProvenanceBuilder.ts
+   205→export interface ProvenanceBuilder {
+   206→  build(decisionId: string, ruleEvaluations: RuleEvaluationResult[], rules: Rule[], bundle: ContextBundle, asOf: string, truthLevel: TruthLevel): Provenance[];
+   207→}
+   208→
+   209→// src/intelligence/context/ContextBuilder.ts
+   210→export interface ContextBuilder {
+   211→  build(request: ContextRequest, registry: PackageRegistry): ContextBundle;
+   212→}
+   213→
+   214→// src/intelligence/decision/DecisionEngine.ts
+   215→export interface DecisionEngine {
+   216→  decide(request: ContextRequest, registry: PackageRegistry): { state: StateSnapshot; provenance: Provenance[]; audit: AuditEvent[]; };
+   217→}
+   218→
+   219→// src/procedures/ProcedureEngine.ts
+   220→export interface ProcedureEngine {
+   221→  currentStep(procedure: Procedure, currentState: string): ProcedureStep | undefined;
+   222→  nextStep(procedure: Procedure, currentState: string, event: string): ProcedureStep | undefined;
+   223→}
+   224→
+   225→// src/situations/SituationEngine.ts
+   226→export interface SituationEngine {
+   227→  initial(situation: Situation): SituationState;
+   228→  transition(situation: Situation, currentState: string, event: string, facts: Fact[]): SituationState;
+   229→  isTerminal(situation: Situation, stateId: string): boolean;
+   230→}
+   231→
+   232→// src/packages/registry/PackageRegistry.ts
+   233→export interface PackageRegistry {
+   234→  listPackages(category?: PackageCategory): PackageManifest[];
+   235→  getPackage(packageId: string): PackageManifest | undefined;
+   236→  listRules(packageId?: string): Rule[];
+   237→  listSituations(packageId?: string): Situation[];
+   238→  listProcedures(situationId?: string): Procedure[];
+   239→  listActions(packageId?: string): Action[];
+   240→  listJurisdictions(packageId?: string): Jurisdiction[];
+   241→  listAuthorities(packageId?: string): Authority[];
+   242→  listSources(packageId?: string): Source[];
+   243→  jurisdictionGraph: JurisdictionGraph;
+   244→}
+   245→```
+   246→
+   247→## Source Layout
+   248→
+   249→```
+   250→src/
+   251→  kernel/
+   252→    primitives/types.ts            (ALL frozen types above — single file)
+   253→    contracts/contracts.ts          (re-export every engine interface + Contract doc strings)
+   254→    truth/truth.ts                  (TruthLevel helpers, badges, colors)
+   255→    jurisdiction/JurisdictionGraph.ts
+   256→    rules/RuleEngine.ts             (deterministic evaluator over ConditionNode trees)
+   257→    rules/conditionEval.ts          (pure condition evaluator, no IO)
+   258→    state/StateEngine.ts
+   259→    evidence/EvidenceGraph.ts
+   260→    time/TemporalModel.ts           (evaluate as_of; covers(range, date) helpers)
+   261→    provenance/ProvenanceBuilder.ts
+   262→    actions/ActionModel.ts
+   263→  intelligence/
+   264→    context/ContextBuilder.ts
+   265→    decision/DecisionEngine.ts
+   266→  procedures/ProcedureEngine.ts
+   267→  situations/SituationEngine.ts
+   268→  packages/
+   269→    registry/PackageRegistry.ts
+   270→    loader.ts                       (loads all built-in packages into a registry)
+   271→  platform/
+   272→    tenancy/TenantContext.ts
+   273→    audit/AuditLog.ts
+   274→    identity/Identity.ts
+   275→  app/
+   276→    api/
+   277→      orient/route.ts               (GET — situations, packages, jurisdictions overview)
+   278→      context/route.ts               (POST — build context bundle)
+   279→      evaluate/route.ts             (POST — evaluate rules against facts)
+   280→      state/route.ts                (POST — compute state snapshot)
+   281→      decisions/route.ts            (GET/POST — list/save decisions)
+   282→      packages/route.ts             (GET — registry listing)
+   283→      audit/route.ts                 (GET — audit trail)
+   284→      jurisdictions/route.ts        (GET — jurisdiction graph)
+   285→    page.tsx                        (Consumer UI)
+   286→  lib/
+   287→    db.ts                           (existing — Prisma client)
+   288→    packages-data/                  (built-in packages as TS modules)
+   289→      ghana-jurisdiction.ts
+   290→      ecowas-jurisdiction.ts
+   291→      afcfta-jurisdiction.ts
+   292→      customs-trade-domain.ts
+   293→      border-crossing-situation.ts
+   294→      base-kernel-capability.ts     (registry seed — common authorities/sources)
+   295→architecture/
+   296→  README.md
+   297→  constitution.md
+   298→  invariants.md
+   299→  contracts/{context,state,rule,decision,evidence,procedure,action,package,extension,tenant,audit}.md
+   300→  decisions/0001-initial-architecture.md, 0002-ruleir-v1.md, 0003-truth-model.md, 0004-jurisdiction-graph.md, 0005-package-registry.md
+   301→  schemas/rule-ir.schema.md
+   302→  package-spec/manifest-spec.md
+   303→  fixtures/border-crossing-golden-01.json
+   304→  diagrams/planes.md
+   305→```
+   306→
+   307→## Frontend Contract (page.tsx will call)
+   308→
+   309→The consumer UI will call these endpoints:
+   310→- `GET /api/orient` → `{ situations: Situation[], packages: PackageManifest[], jurisdictionTree: ... , planes: Plane[] }`
+   311→- `POST /api/context` (body: ContextRequest) → ContextBundle
+   312→- `POST /api/evaluate` (body: { facts: Fact[], jurisdictionIds: string[], asOf: string, situationId?: string }) → `{ evaluations: RuleEvaluationResult[] }`
+   313→- `POST /api/state` (body: ContextRequest) → `{ state: StateSnapshot, provenance: Provenance[], audit: AuditEvent[] }`
+   314→- `GET /api/packages` → `{ packages: PackageManifest[] }`
+   315→- `GET /api/jurisdictions` → `{ jurisdictions: Jurisdiction[], edges: JurisdictionEdge[] }`
+   316→- `GET /api/audit?limit=50` → `{ events: AuditEvent[] }`
+   317→
+   318→## Rules for all subagents
+   319→
+   320→1. Read this worklog first.
+   321→2. Use the EXACT types from `src/kernel/primitives/types.ts`. Do not redefine.
+   322→3. Kernel code MUST be domain-agnostic — no `if (insurance)`, no `if (border)`, no `InsuranceClaim`, no `ADU` types in kernel.
+   323→4. Vertical concepts go in `src/lib/packages-data/*` as package data composed over generic primitives.
+   324→5. Every material decision must carry Provenance.
+   325→6. Truth levels must be preserved end-to-end (storage → reasoning → UI).
+   326→7. Append your work record to this worklog when done.
+   327→8. Do NOT break the contract surface — implement against it.
+   328→
+   329→---
+   330→Task ID: 6
+   331→Agent: Platform Builder
+   332→Task: Build Prisma schema + platform (tenancy/audit/identity) + db push
+   333→
+   334→Work Log:
+   335→- Step 1 (schema): Wrote `/home/z/my-project/prisma/schema.prisma` from scratch. Removed the placeholder `User` and `Post` models. Added 8 domain-agnostic kernel persistence models: `Tenant`, `AuditEvent`, `DecisionRecord`, `PackageRecord`, `RuleVersion`, `JurisdictionRecord`, `FactRecord`, `EvidenceRecord`. SQLite-compatible (no native enums; allowed enum values documented inline in comments; lists stored as JSON-encoded `String` columns: `parentIdsJson`, `extractedFactIdsJson`, `provenanceJson`, `stateJson`, `manifestJson`, `ruleJson`, `payloadJson`, `valueJson`, `sourceJson`). Indexes added on `AuditEvent(tenantId, timestamp)`, `DecisionRecord(tenantId, computedAt)`, `RuleVersion(jurisdictionId, validFrom)`, `FactRecord(subjectId, attribute)` and `FactRecord(tenantId)`. Composite uniques on `PackageRecord(packageId, version)` and `RuleVersion(ruleId, version)`; `JurisdictionRecord.code` is unique. Tenant FK relations wired to AuditEvent/DecisionRecord/FactRecord/EvidenceRecord.
+   336→- Step 2 (db:push): `bun run db:push` (which runs `prisma db push --accept-data-loss`) succeeded on first attempt. Output:
+   337→    `$ prisma db push --accept-data-loss`
+   338→    `Environment variables loaded from .env`
+   339→    `Prisma schema loaded from prisma/schema.prisma`
+   340→    `Datasource "db": SQLite database "custom.db" at "file:/home/z/my-project/db/custom.db"`
+   341→    `🚀  Your database is now in sync with your Prisma schema. Done in 15ms`
+   342→    `Running generate... - Prisma Client`
+   343→    `✔ Generated Prisma Client (v6.19.2) to ./node_modules/@prisma/client in 110ms`
+   344→  Verified by listing SQLite tables: AuditEvent, DecisionRecord, EvidenceRecord, FactRecord, JurisdictionRecord, PackageRecord, RuleVersion, Tenant. Verified `src/lib/db.ts` still imports `@prisma/client` and instantiates correctly (object returned). The existing `.env` was already set to `DATABASE_URL=file:/home/z/my-project/db/custom.db` — kept unchanged because it matches the existing project root DB file at `/home/z/my-project/db/custom.db`.
+   345→- Step 3 (TenantContext): Built `src/platform/tenancy/TenantContext.ts`. Exports `TenantKind`, `TenantContext` interface, `globalContext()`, `tenantContext()`, `isGlobal()`, `assertCanRead()`, `assertCanWrite()`. Implements I9: GLOBAL can read only GLOBAL and never write; TENANT can read GLOBAL + own TENANT and write own TENANT; USER can read GLOBAL + own TENANT + own USER and write own USER. Smoke-tested all predicate combinations — all behave per spec.
+   346→- Step 4 (AuditLog): Built `src/platform/audit/AuditLog.ts`. Exports `AuditLog` interface, `createDbAuditLog()`, `createInMemoryAuditLog()`. `DbAuditLog` imports `db` from `@/lib/db` and persists to the Prisma `AuditEvent` table; every Prisma call is wrapped in try/catch — `record()` falls back to a synthesized event (with `fallback-*` id) instead of throwing, `recent()`/`forSubject()` return `[]` on failure. All paths log to `console.warn` and never throw. Round-trip tested against the live SQLite DB (insert tenant → record 1 audit event → read recent → read forSubject → cleanup) — succeeds.
+   347→- Step 5 (Identity): Built `src/platform/identity/Identity.ts`. Exports `IdentityRole`, `Identity` interface, `demoIdentities` (4 entries), `getIdentity(id)`. The 4 demo identities: `id_guest` (GUEST, no tenant), `id_kwame` (USER, INDIVIDUAL — Ghanaian individual), `id_ada_ops` (OPERATOR, ENTERPRISE), `id_admin` (ADMIN, PROFESSIONAL_ORG). Uses `import type { TenantKind } from '@/platform/tenancy/TenantContext'` for type alignment.
+   348→- Step 6 (lint): `bun run lint` exits with code 0 (0 errors, 0 warnings) after removing three unused `eslint-disable-next-line no-console` directives. Also ran `bunx prisma validate` — schema is valid. Note: `AuditLog.ts` imports `type { AuditEvent } from '@/kernel/primitives/types'` — this file does not yet exist (Task 7 / kernel builder is responsible). ESLint passes regardless because the import is type-only. Once the kernel builder creates `src/kernel/primitives/types.ts` with the FROZEN `AuditEvent` shape, the full TypeScript pipeline will compile cleanly.
+   349→
+   350→Stage Summary:
+   351→- Models created: Tenant, AuditEvent, DecisionRecord, PackageRecord, RuleVersion, JurisdictionRecord, FactRecord, EvidenceRecord (8 models, all SQLite-compatible; no Json-array columns).
+   352→- Files produced:
+   353→  - `/home/z/my-project/prisma/schema.prisma` (overwritten — replaces placeholder User/Post schema).
+   354→  - `/home/z/my-project/src/platform/tenancy/TenantContext.ts`
+   355→  - `/home/z/my-project/src/platform/audit/AuditLog.ts`
+   356→  - `/home/z/my-project/src/platform/identity/Identity.ts`
+   357→- Decisions / deviations:
+   358→  - Kept the existing `DATABASE_URL=file:/home/z/my-project/db/custom.db` (absolute) in `.env` — the task suggested `file:./db/custom.db` but instructed to "make sure the path matches the existing setup". Verified the DB file exists at `/home/z/my-project/db/custom.db` and `db.ts` continues to work, so no change was made.
+   359→  - Used `String` (not Prisma `enum`) for all enumerated fields because SQLite has no native enum support; allowed values are documented in inline comments next to each field.
+   360→  - `AuditLog.record()` returns a synthesized event with a `fallback-*` id when persistence fails (e.g. FK constraint or DB unavailable) — this preserves the async contract (always returns an `AuditEvent`) while still never throwing.
+   361→  - Did not touch `src/kernel/`, `src/app/`, or `src/lib/db.ts`. Schema and platform modules depend only on the FROZEN `AuditEvent` and `TenantKind` types via type-only imports.
+   362→
+   363→---
+   364→Task ID: 2
+   365→Agent: Architecture Writer
+   366→Task: Write frozen architecture/ docs (constitution, invariants, contracts, ADRs, schemas, fixtures, diagrams)
+   367→
+   368→Work Log:
+   369→- Read worklog.md (FROZEN Shared TypeScript Contract Surface and Source Layout) and the full 47-section source specification in upload/Pasted Content_1787114632683.txt.
+   370→- Created the architecture directory tree: architecture/{contracts,decisions,schemas,package-spec,fixtures,diagrams}.
+   371→- Wrote architecture/README.md as the directory map: lists every file with a one-line description, declares the FROZEN notice and ACO-only change mechanism, lists the 5 planes and the 18 invariants (I1–I18) verbatim.
+   372→- Wrote architecture/constitution.md as the formal constitution mirroring all 47 source-spec sections: product thesis (§1), the 5 frozen planes (§2), kernel primitives with the absolute prohibition on vertical-specific kernel concepts (InsuranceClaim, ADU, HospitalAssistance, TrafficStop, AfCFTAShipment) and if(insurance)/if(border)/if(zoning)/if(healthcare) branches (§3), state as first-class (§4), jurisdictions as a graph with the 11 relationship types (§5), domain/situation/procedure/place (§6–9), rule engine separation from LLM (§10), RuleIR (§11), rule types (§12), truth model T0–T5 (§13), provenance (§14), temporal model (§15), summaries of §16–30, the 18 invariants verbatim (§31), summaries of the §32–46 process, the ACO mechanism (§46), and the §47 final principle quoted verbatim.
+   373→- Wrote architecture/invariants.md: each of I1–I18 with the invariant statement, why it matters, what violates it, a correct-vs-incorrect TypeScript snippet, and the architecture test name that catches the violation (referencing the section 34 test suite).
+   374→- Wrote 11 contract docs in architecture/contracts/ (context, state, rule, decision, evidence, procedure, action, package, extension, tenant, audit). Each carries Purpose, Inputs, Outputs, Errors, Versioning, Security, Provenance, Idempotency, Failure Semantics, and Invariants Enforced, and points to src/kernel/primitives/types.ts as the authoritative primitive surface.
+   375→- Wrote 5 ADRs in architecture/decisions/: 0001-initial-architecture (ACCEPTED — adopts 5-plane architecture and kernel/package split), 0002-ruleir-v1 (RuleIR with ConditionNode trees and RuleEffect arrays; authoritative legal text remains source of truth), 0003-truth-model (T0–T5 hierarchy and four rule types), 0004-jurisdiction-graph (jurisdictions as a graph; country is a dimension not the boundary), 0005-package-registry (manifest spec, four package categories, 10-point quality gate). Each follows the §36 template and is in the 80–150-line range.
+   376→- Wrote architecture/schemas/rule-ir.schema.md: human-readable RuleIR schema (top-level fields, ConditionNode discriminated union, the 9 leaf operators, RuleEffect, Definition) plus a JSON example of an AfCFTA-style customs duty rule with one condition (and-tree), one exception (or-tree), and two effects (RIGHT + FEE).
+   377→- Wrote architecture/package-spec/manifest-spec.md: every required PackageManifest field, the four package categories (JURISDICTION/DOMAIN/SITUATION/CAPABILITY), the 10-point quality gate from §20 enumerated, the immutability-after-publication rule, and the invariants enforced.
+   378→- Wrote architecture/fixtures/border-crossing-golden-01.json: a reproducible golden fixture for a Ghana→Togo border crossing via Aflao (private car, Ghanaian national, personal effects under USD 500, no restricted items, no commercial purpose). Includes input facts, expected applicable jurisdictions (Ghana, Togo, ECOWAS, AfCFTA), expected fired rules (ECOWAS Protocol A/P.1/5/79 Article 3; AfCFTA de minimis), expected state snapshot fields, the full provenance chain with calculation steps, audit events, and a reproducibility note citing I13. Validated as parseable JSON.
+   379→- Wrote architecture/diagrams/planes.md: a Mermaid diagram plus an ASCII variant of the 5 planes with the kernel at the center and packages (JURISDICTION/DOMAIN/SITUATION/CAPABILITY) orbiting it, plus a second diagram (Mermaid + ASCII) of the request flow USER → LLM/parser → ContextBuilder → RuleEngine → StateEngine → ProvenanceBuilder → DecisionEngine → Explanation generator → ActionModel → updated state, with the LLM explicitly marked non-authoritative per I5.
+   380→- Verified every file is internally consistent with the source spec (sections 1–47), the worklog FROZEN TypeScript contract surface, and the source layout. Confirmed final line counts: constitution 490 (slightly above the 200–400 target because it mirrors all 47 sections exactly), invariants 300 (in range), contracts 65–76 (in range), ADRs 83–105 (in range), schema 192, package-spec 127, diagrams 267.
+   381→
+   382→Stage Summary:
+   383→- Files produced (23 total): architecture/README.md, architecture/constitution.md, architecture/invariants.md; architecture/contracts/{context,state,rule,decision,evidence,procedure,action,package,extension,tenant,audit}.md; architecture/decisions/0001-initial-architecture.md, 0002-ruleir-v1.md, 0003-truth-model.md, 0004-jurisdiction-graph.md, 0005-package-registry.md; architecture/schemas/rule-ir.schema.md; architecture/package-spec/manifest-spec.md; architecture/fixtures/border-crossing-golden-01.json; architecture/diagrams/planes.md.
+   384→- Key decisions: (1) The constitution mirrors every source-spec section exactly so that future subagents can cross-reference section numbers; (2) Each invariant and contract cross-references invariants by I-number (e.g., "per I5, LLM output is never authoritative legal truth") and points to src/kernel/primitives/types.ts as the authoritative primitive surface; (3) The border-crossing golden fixture is fully reproducible (same input + same package versions → identical state/provenance/audit) per I13, with a deterministic idempotency key; (4) All docs declare FROZEN status and route changes through the ACO process per §46; (5) TypeScript code appears only as illustrative contract snippets (clearly marked "see kernel primitives"), never as implementation.
+   385→- No files outside architecture/ were modified. The src/ tree was not touched.
+   386→
+   387→---
+   388→Task ID: 4
+   389→Agent: Engine Builder
+   390→Task: Build all kernel engines (JurisdictionGraph, RuleEngine, StateEngine, ProvenanceBuilder, EvidenceGraph, ActionModel, SituationEngine, ProcedureEngine, ContextBuilder, DecisionEngine)
+   391→
+   392→Work Log:
+   393→- Step 0 (audit): Ran `bunx tsc --noEmit` first. Found ONE kernel-level compile error: `src/kernel/contracts/contracts.ts` (FROZEN) imports `RuleEvaluationResult` from `@/kernel/primitives/types`, but `types.ts` did not export it. The worklog's FROZEN contract surface lists the interface, so this was a missing additive type, not a contract change. Resolution: added the single `RuleEvaluationResult` interface to `types.ts` at line 299-314 (immediately after `Definition`, before the State section). NO existing types were modified — only an additive interface was appended. All existing imports/exports preserved byte-for-byte. Documented as a compatibility fix below.
+   394→- Step 1 (JurisdictionGraph): Built `src/kernel/jurisdiction/JurisdictionGraph.ts`. In-memory directed graph: `nodes: Map<id, Jurisdiction>`, `outEdges: Map<fromId, Edge[]>`, `inEdges: Map<toId, Edge[]>`. `ancestors(id)` BFS-traverses APPLIES_TO/DERIVES_FROM/IMPLEMENTS/REFERENCES/INTERPRETS upward; `descendants(id)` traverses the inverse of OVERRIDES/PREEMPTS/MODIFIES/EXEMPTS/CONDITIONAL_ON/SUPERSEDES downward. Both use visited-set deduplication (cycle-safe, nearest-first). `applicableFor(ids, asOf)` returns input jurisdictions + BFS ancestors, filtered to those whose `temporal` covers `asOf` via `covers()`. `relations(id)` returns out-edges then in-edges. Factory: `createJurisdictionGraph()`.
+   395→- Step 2 (conditionEval): Built `src/kernel/rules/conditionEval.ts`. PURE function `evaluateCondition(node, facts)`. Handles all 9 leaf operators: `eq` (===), `neq` (!==, requires ≥1 matching fact), `gt/gte/lt/lte` (numeric via `toFiniteNumber()` helper — returns false on NaN/non-numeric, never throws), `in` (Array.isArray(node.value) && includes factValue), `contains` (works on strings and arrays; `node.value` may be string or number), `exists` (any fact with the attribute, value ignored). `and`/`or`/`not` recurse. Missing facts → false (defensive, I5). No IO, no LLM, no Date.now(), no side effects.
+   396→- Step 3 (RuleEngine): Built `src/kernel/rules/RuleEngine.ts`. `evaluate(rule, facts, asOf)`: (1) checks `covers(rule.temporal, asOf)` — false → returns matched=false with a `temporal` calculation step; (2) evaluates `rule.ruleIr.conditions` via `evaluateCondition`; (3) evaluates each exception in `rule.ruleIr.exceptions`; (4) if conditions match AND no exception matched: matched=true, `firedEffects = rule.ruleIr.effects.map(e => ({...e}))`; (5) builds a calculation array with `ruleClause` tags: `'temporal'`, `'conditions'`, `'exception[0]'`…`'exception[N-1]'`, `'outcome'`. `evaluateAll` maps over rules. Factory: `createRuleEngine()`.
+   397→- Step 4 (StateEngine): Built `src/kernel/state/StateEngine.ts`. `compute(bundle, situation, rules, ruleEngine)`: runs `evaluateAll`, collects fired effects preserving `(ruleId, effect, truthLevel)`, buckets by kind into `obligations`/`rights`/`permissions`/`restrictions`/`options` (FEE and CONSEQUENCE fold only into `firedEffects`). Obligation `id` = `${ruleId}:${effect.code}` (deduplicated via `seenIds` Set). Obligation `dueBy` is extracted from `effect.detail` via an ISO-date regex (heuristic; documented). `truthLevel` = `combineTruthLevels(firedEffects.map(fe => fe.truthLevel))`, defaulting to `'T0'` when nothing fired (an empty state is still authoritative). `situationId` = `situation?.id ?? 'adhoc'`. `provenance: []` (filled by ProvenanceBuilder). `computedAt` = `new Date().toISOString()` (informational only). Factory: `createStateEngine()`.
+   398→- Step 5 (ProvenanceBuilder): Built `src/kernel/provenance/ProvenanceBuilder.ts`. `build(decisionId, ruleEvaluations, rules, bundle, asOf, truthLevel)`: for each matched evaluation, looks up the Rule by id, then builds a `Provenance` with `ruleVersion` from `rule.temporal.version`. `source` lookup: searches `bundle.sources` for `rule.sourceId`, builds `SourceRef` with citation+url; falls back to `{sourceId, citation: rule.sourceId}` if missing. `authority` lookup: searches `bundle.resolvedAuthorities` for `rule.authorityId`, builds `AuthorityRef` with name+jurisdictionId; falls back to `{authorityId: rule.authorityId, name: rule.authorityId, jurisdictionId: rule.jurisdictionId}`. `facts`: recursively walks BOTH `rule.ruleIr.conditions` AND every `rule.ruleIr.exceptions[]` collecting all `leaf.fact` attribute names via `collectLeafAttributes()`, then matches `bundle.request.facts` by attribute, deduplicated by factId. `evidence`: any `bundle.evidence` whose `extractedFactIds` overlap with the rule's referenced fact ids. `calculation`: copied from the evaluation's `calculation` (cloned via spread to prevent mutation). `assumptions: []` (populated by future LLM extractors; v1 has none). `producedAt` = `new Date().toISOString()` (informational). The `truthLevel` parameter is accepted for context but each provenance entry carries its own per-rule truthLevel (I8).
+   399→- Step 6 (EvidenceGraph): Built `src/kernel/evidence/EvidenceGraph.ts`. In-memory store with three indices: `byId: Map`, `byFact: Map<factId, Evidence[]>`, `byDocument: Map<documentId, Evidence[]>`. `add(e)` is idempotent on id — re-adding removes the old entry from indices first (no duplicate leakage). `forFact`, `forDocument`, `all` return defensive copies (so external mutations don't corrupt state). `all()` preserves insertion order. Factory: `createEvidenceGraph()`.
+   400→- Step 7 (ActionModel): Built `src/kernel/actions/ActionModel.ts`. Two pure helpers: `canExecute(action, facts)` returns `true` if `action.preconditions` is undefined, otherwise `evaluateCondition(action.preconditions, facts)`. `applicableActions(actions, facts)` filters by `canExecute`, preserving input order. No IO, no LLM.
+   401→- Step 8 (SituationEngine): Built `src/situations/SituationEngine.ts`. `initial(situation)` returns `states[0]` (defensive synthesised state if empty). `transition(situation, currentState, event, facts)`: finds first transition with `from === currentState && event === event`; if `requiredFacts` is set, verifies each named attribute has ≥1 fact present (any value) — returns current state unchanged if missing; if `preconditions` is set, evaluates via `evaluateCondition` — returns current state if false; returns the state with `transition.to` id. `isTerminal(situation, stateId)`: returns `state.isTerminal === true` (false for missing/non-terminal). Pure: no IO, no LLM, no Date.now(). Factory: `createSituationEngine()`.
+   402→- Step 9 (ProcedureEngine): Built `src/procedures/ProcedureEngine.ts`. `currentStep(procedure, currentState)`: lookup by `code === currentState`; falls back to `steps[0]` (defensive). `nextStep(procedure, currentState, _event)`: returns the step referenced by `currentStep.nextStep` if set, otherwise returns currentStep. Events are accepted but IGNORED in v1 (procedures are linear with explicit `nextStep` chains; branching can be added later by extensions without changing the contract). Factory: `createProcedureEngine()`.
+   403→- Step 10 (ContextBuilder): Built `src/intelligence/context/ContextBuilder.ts`. `build(request, registry)`: (1) `resolvedJurisdictions` = `registry.jurisdictionGraph.applicableFor(request.jurisdictionIds, request.asOf)` — already returns ancestors filtered by temporal coverage; (2) `resolvedAuthorities` = `listAuthorities()` filtered to those whose `jurisdictionId` is in the resolved set; (3) `applicableRules` = `listRules()` filtered to `covers(rule.temporal, request.asOf)` AND `rule.jurisdictionId` is in the resolved set (the ancestor check is implicit in `applicableFor`); (4) `evidence` = `listEvidence()` filtered to those whose `extractedFactIds` overlap with `request.facts.map(f => f.id)` (skips work entirely if request has no facts); (5) `sources` = `listSources()` filtered to those referenced by applicableRules. Returns `ContextBundle` with all five plus the original `request`. Factory: `createContextBuilder()`.
+   404→- Step 11 (DecisionEngine): Built `src/intelligence/decision/DecisionEngine.ts`. `decide(request, registry)` is SYNCHRONOUS (matches the FROZEN contract). Pipeline: (1) `decisionId = crypto.randomUUID()`; (2) `bundle = contextBuilder.build(request, registry)`; (3) `situation = registry.listSituations().find(...)` (optional); (4) `evaluations = ruleEngine.evaluateAll(rules, request.facts, request.asOf)`; (5) `state = stateEngine.compute(bundle, situation, rules, ruleEngine)`, then OVERRIDE `state.applicableRules` to only matched rules; (6) `provenance = provenanceBuilder.build(decisionId, matchedEvaluations, rules, bundle, request.asOf, state.truthLevel)`, then `state.provenance = provenance`; (7) construct an `AuditEvent` synchronously with `id = crypto.randomUUID()` and `timestamp = new Date().toISOString()`; (8) enqueue `auditLog.record({...payload, responseEventId: auditEvent.id})` WITHOUT awaiting — `.catch()` swallows any persistence failure (audit recording MUST NEVER throw, per the AuditLog contract); (9) return `{ state, provenance, audit: [auditEvent] }`. Rationale: the AuditLog is async, but the DecisionEngine contract is sync — the only way to honour both is to construct the event locally AND fire-and-forget the persistence call. The persisted event gets its own id/timestamp from the log; the response carries our locally-built event. `createDecisionEngine(auditLog?)` injects the audit log, defaulting to `createInMemoryAuditLog()`.
+   405→- Step 12 (kernel/index.ts barrel): Built `src/kernel/index.ts`. Re-exports: ALL types from `./primitives/types` via `export *`; engine interfaces from `./contracts/contracts` via `export type`; factories for every engine (`createJurisdictionGraph`, `createRuleEngine`, `createStateEngine`, `createProvenanceBuilder`, `createEvidenceGraph`, `createContextBuilder`, `createDecisionEngine`, `createSituationEngine`, `createProcedureEngine`); truth helpers (`TRUTH_LEVELS`, `TRUTH_RANK`, `TRUTH_LABEL`, `TRUTH_DESCRIPTION`, `TRUTH_BADGE`, `combineTruthLevels`, `isAuthoritative`, `isObservational`); temporal helpers (`covers`, `isoDate`, `isoTimestamp`, `today`, `openRange`, `pickAsOf`, `inEffectAsOf`); `canExecute`, `applicableActions`, `evaluateCondition`, and `EvidenceGraph` type for convenience.
+   406→- Step 13 (smoke test): Wrote a temporary `src/kernel/__smoke__.ts` exercising every engine end-to-end (jurisdiction ancestors/applicableFor, condition eval for all 9 operators including missing-fact handling, rule engine with conditions+exceptions+temporal-skip, situation transitions+isTerminal, procedure currentStep/nextStep, action model, evidence graph, full DecisionEngine pipeline with provenance chain verification, and a determinism check by running decide() twice). All tests passed; verified: GH→[ECOWAS, AFCFTA] ancestors, rule matched with 2 fired effects, exception path correctly sets skippedDueToException=true, temporal skip yields `calculation[0].ruleClause === 'temporal'`, full pipeline produces 1 matched rule / 2 fired effects / 1 right / 1 obligation / T0 truthLevel / 1 provenance with 2 facts + 1 evidence ref / 1 audit event. Smoke test file was deleted after passing — it was for verification only, not part of the deliverable.
+   407→- Step 14 (lint + tsc): `bun run lint` exits 0 (0 errors, 0 warnings) after removing one unused eslint-disable directive in DecisionEngine.ts. `bunx tsc --noEmit` reports 0 kernel/platform errors. The only remaining TS errors are in `examples/websocket/` (missing socket.io modules — pre-existing, eslint-ignored) and `skills/` (pre-existing, eslint-ignored) — neither is in scope for Task 4.
+   408→
+   409→Stage Summary:
+   410→- Files produced (12):
+   411→  - `/home/z/my-project/src/kernel/jurisdiction/JurisdictionGraph.ts`
+   412→  - `/home/z/my-project/src/kernel/rules/conditionEval.ts`
+   413→  - `/home/z/my-project/src/kernel/rules/RuleEngine.ts`
+   414→  - `/home/z/my-project/src/kernel/state/StateEngine.ts`
+   415→  - `/home/z/my-project/src/kernel/provenance/ProvenanceBuilder.ts`
+   416→  - `/home/z/my-project/src/kernel/evidence/EvidenceGraph.ts`
+   417→  - `/home/z/my-project/src/kernel/actions/ActionModel.ts`
+   418→  - `/home/z/my-project/src/situations/SituationEngine.ts`
+   419→  - `/home/z/my-project/src/procedures/ProcedureEngine.ts`
+   420→  - `/home/z/my-project/src/intelligence/context/ContextBuilder.ts`
+   421→  - `/home/z/my-project/src/intelligence/decision/DecisionEngine.ts`
+   422→  - `/home/z/my-project/src/kernel/index.ts` (barrel)
+   423→- Files modified (1 — additive only):
+   424→  - `/home/z/my-project/src/kernel/primitives/types.ts` — added the single missing `RuleEvaluationResult` interface (15 lines) at the end of the RuleIR section. NO existing types were modified; this was the minimum compatibility fix required because the FROZEN `contracts.ts` already imports `RuleEvaluationResult` from `types.ts` (lines 25 and 61) but the interface was missing. The interface matches the worklog's FROZEN contract surface exactly (ruleId, matched, skippedDueToException, firedEffects, truthLevel, calculation). This is documented here so the API/frontend builder knows the surface is now self-consistent.
+   425→- Key decisions / simplifications (so API/frontend builder knows):
+   426→  - **DecisionEngine.decide() is SYNCHRONOUS** to match the FROZEN contract return type `{ state, provenance, audit }` (not `Promise<...>`). The AuditLog is async, so the engine constructs the AuditEvent locally (with `crypto.randomUUID()` id + `new Date().toISOString()` timestamp), pushes it into the returned `audit[]` immediately, AND fires-and-forgets `auditLog.record(...)` — `.catch()` swallows any persistence failure. The persisted event gets its own id/timestamp from the log; the response carries our locally-built event. If the API layer needs to AWAIT audit persistence (e.g. for a strict "audit-then-respond" guarantee), it can call `createDbAuditLog()` and await separately, OR a future ACO can change `decide()` to async — but for v1 the sync contract is preserved exactly as frozen.
+   427→  - **Obligation `dueBy` is a heuristic**: extracted from `effect.detail` via an ISO-date regex (YYYY-MM-DD). Packages that need an exact dueBy should populate it via a structured extension (out of v1 scope). The `detail` field is free-text in the frozen primitive, so a regex is the only non-breaking option.
+   428→  - **OPTION effects do NOT carry `actionId`**: the frozen `Option` interface has `actionId?: string` (optional), but `RuleEffect` has no field linking to an action. v1 leaves `actionId: undefined`; the Execution plane can backfill by matching Option codes to Action codes later. The `Option.preconditions` field is also left undefined — ActionModel re-evaluates preconditions on demand via `canExecute(action, facts)`.
+   429→  - **`skippedDueToException` semantics**: if MULTIPLE exceptions match, only the FIRST matching index is noted in the calculation step description ("Rule skipped due to exception[0]"). All exceptions are still evaluated and recorded (each gets its own calculation step), so the audit trail is complete. The `skippedDueToException` flag is a single boolean (no list).
+   430→  - **State truthLevel defaults to T0 when no effects fired**: an empty state (no rules fired) is still authoritative — it just means "no obligations/rights apply". `combineTruthLevels([])` itself returns T5 (the helper's safe default), but the StateEngine special-cases the empty list to T0 because the absence of rules is itself an authoritative determination.
+   431→  - **ProcedureEngine ignores events in v1**: the `event` parameter is accepted (to satisfy the frozen signature) but not used. Procedures are linear chains via `step.nextStep`. Branching by event can be added later by extensions without changing the contract — the engine is intentionally minimal.
+   432→  - **SituationEngine first-match-wins**: if a situation declares multiple transitions for the same (from, event), the first one in declaration order wins. Situation authors are expected to ensure determinism by declaring at most one transition per (from, event) pair. The engine does not validate this.
+   433→  - **RuleEvaluationResult added to types.ts (additive)**: as documented in Work Log Step 0, this was a missing interface that the FROZEN `contracts.ts` already imported. Added at line 299-314. No existing types touched.
+   434→- Lint result: `bun run lint` → 0 errors, 0 warnings. `bunx tsc --noEmit` → 0 errors in `src/kernel/`, `src/intelligence/`, `src/situations/`, `src/procedures/`, `src/platform/`. The remaining TS errors are pre-existing in `examples/websocket/` and `skills/` (eslint-ignored, out of scope).
+   435→- Determinism: every engine verified deterministic via smoke test (same inputs → same outputs modulo `producedAt`/`computedAt`/`timestamp` informational ISO timestamps). No `Date.now()` inside pure evaluation paths (only in factories that build timestamps for provenance/state/audit). No LLM anywhere (I5). Provenance and truth levels preserved end-to-end (I6, I8).
+   436→
+   437→---
+   438→Task ID: 5
+   439→Agent: Package Data Builder
+   440→Task: Build packages data (Ghana, Togo, ECOWAS, AfCFTA jurisdictions; customs-trade domain; border-crossing situation) + registry + loader
+   441→
+   442→Work Log:
+   443→- Step 0 (orient): Read worklog.md (Shared TypeScript Contract Surface + Source Layout), src/kernel/primitives/types.ts (FROZEN primitive surface), architecture/fixtures/border-crossing-golden-01.json (golden fixture behaviour reference), and architecture/constitution.md (§5 jurisdictions as a graph, §6 domain packs, §7 situation packs, §18 package architecture, §19 package manifest). Confirmed src/lib/packages-data/ and src/packages/registry/ existed but were empty; src/kernel/jurisdiction/JurisdictionGraph.ts landed mid-task (Task 4 in parallel), so the registry now imports `createJurisdictionGraph` from there directly rather than shipping a local InMemoryJurisdictionGraph.
+   444→- Step 1 (base-kernel-capability.ts): Built the CAPABILITY package seed. Manifest: packageId 'nomos.base-kernel', version '1.0.0', category 'CAPABILITY', no dependencies, capabilities ['nomos.platform.documentation','nomos.platform.fallbacks']. Adds an implicit `jur.global` SUPRANATIONAL jurisdiction (validFrom 1970-01-01, version 1), one `auth.nomos.platform` authority (kind OTHER) attached to jur.global, and one `src.nomos.platform-docs` source — a generic fallback anchor for any package that needs a default provenance anchor.
+   445→- Step 2 (ghana-jurisdiction.ts): Built the Ghana JURISDICTION package. Manifest: packageId 'jur.ghana', version '1.0.0', category 'JURISDICTION', dependencies [{nomos.base-kernel, ^1.0.0}], supportedJurisdictions ['jur.ghana']. Three jurisdictions: jur.ghana (COUNTRY, validFrom 1957-03-06), jur.ghana.region.volta (REGION, parent jur.ghana), jur.ghana.municipal.aflao (MUNICIPALITY, parent jur.ghana.region.volta). Two APPLIES_TO edges (Volta→Ghana, Aflao→Volta). Three authorities (Parliament LEGISLATURE, GRA Customs Division CUSTOMS, Ghana Immigration Service IMMIGRATION). Three sources: Constitution 1992, Customs Act 2015 (Act 891), Immigration Act 2000 (Act 573). All citations well-formed with publication dates matching real-world dates.
+   446→- Step 3 (togo-jurisdiction.ts): Same structure for Togo. Manifest: packageId 'jur.togo', version '1.0.0'. Three jurisdictions: jur.togo (COUNTRY, validFrom 1960-04-27 — independence from France), jur.togo.region.plateaux (REGION, parent jur.togo), jur.togo.municipal.sanvega (MUNICIPALITY, parent jur.togo.region.plateaux). Two APPLIES_TO edges. Three authorities: Assemblée Nationale (LEGISLATURE), Direction Générale des Douanes (CUSTOMS), Direction Générale de la Sûreté Nationale (IMMIGRATION). Three sources: Constitution 1992, Code des Douanes, Loi 2007-006 Immigration.
+   447→- Step 4 (ecowas-jurisdiction.ts): Built the ECOWAS SUPRANATIONAL JURISDICTION package. Manifest: packageId 'jur.ecowas', version '1.0.0'. Two jurisdictions: jur.ecowas (SUPRANATIONAL, validFrom 1975-05-28 — Treaty of Lagos), jur.ecowas.fm-protocol (SUPRANATIONAL, parent jur.ecowas, validFrom 1979-05-29 — Protocol A/P.1/5/79). Three DERIVES_FROM/APPLIES_TO edges: jur.ghana→jur.ecowas, jur.togo→jur.ecowas, jur.ecowas.fm-protocol→jur.ecowas. (These cross-reference jurisdictions declared in other packages — the loader flattens them globally into the JurisdictionGraph.) One authority: Authority of ECOWAS Heads of State and Government (INTERNATIONAL_BODY). One source: Protocol A/P.1/5/79. Three DETERMINISTIC T0 rules:
+   448→  * rule.ecowas.fm.art3 (ECOWAS-FM-ART3) — Art. 3 right of entry without visa for ECOWAS nationals. Conditions: leaf `nationality in [15 ECOWAS member states]`. Exceptions: none. Effects: RIGHT(RIGHT_FREE_ENTRY) + PERMISSION(PERMISSION_TRANSIT_90DAYS).
+   449→  * rule.ecowas.fm.art4 (ECOWAS-FM-ART4) — Art. 4 entry may be refused on public policy/security/health grounds. Conditions: and(nationality in member list, hasPublicSecurityRisk eq true). Exceptions: none. Effects: RESTRICTION(RESTRICTION_ENTRY_REFUSED).
+   450→  * rule.ecowas.fm.residence (ECOWAS-FM-ART5) — Art. 5 residence right. Conditions: and(nationality in member list, intendedStayDays lte 90). Effects: RIGHT(RIGHT_RESIDENCE_TEMPORARY).
+   451→  Each rule has the required temporal (validFrom 1979-05-29, version 1), packageId, truthLevel T0, jurisdictionId, authorityId, sourceId, and RuleIR with explicit conditions tree + effects array + references to src.ecowas.fm-1979.
+   452→- Step 5 (afcfta-jurisdiction.ts): Built the AfCFTA SUPRANATIONAL JURISDICTION package. Manifest: packageId 'jur.afcfta', version '1.0.0'. One jurisdiction: jur.afcfta (SUPRANATIONAL, validFrom 2019-05-30, publishedAt 2018-03-21 — Kigali signing). Three DERIVES_FROM edges: jur.ecowas→jur.afcfta, jur.ghana→jur.afcfta, jur.togo→jur.afcfta (cross-package lineage, flattened by loader). One authority: AfCFTA Secretariat (INTERNATIONAL_BODY). One source: Agreement Establishing the AfCFTA. Three DETERMINISTIC T0 rules (all carry authorityId auth.afcfta.secretariat — the OBLIGATION effect in rule.afcfta.duty.commercial derives its authorityId from the Rule itself, not the RuleEffect, per the FROZEN types):
+   453→  * rule.afcfta.deminimis.personal (AFCFTA-DEMINIMIS-PERSONAL) — Conditions: and(goodsValueUsd lt 500, goodsPurpose eq 'personal'). Effects: RIGHT(RIGHT_DEMINIMIS_EXEMPT).
+   454→  * rule.afcfta.duty.commercial (AFCFTA-DUTY-COMMERCIAL) — Conditions: and(goodsValueUsd gte 500, goodsPurpose eq 'commercial'). Effects: OBLIGATION(OBLIGATION_DECLARE_GOODS) + FEE(FEE_CUSTOMS_DUTY, amount {value:0, currency:'USD', basis:'Preferential tariff where origin rules met; otherwise MFN'}).
+   455→  * rule.afcfta.prohibited.goods (AFCFTA-PROHIBITED-GOODS) — Conditions: leaf hasProhibitedGoods eq true. Effects: RESTRICTION(RESTRICTION_PROHIBITED_GOODS).
+   456→- Step 6 (customs-trade-domain.ts): Built the DOMAIN package. Manifest: packageId 'pkg.domain.customs-trade', version '1.0.0', category 'DOMAIN', dependencies [{jur.afcfta, ^1.0.0}, {jur.ecowas, ^1.0.0}], domains ['customs-trade']. Three actions:
+   457→  * act.declare-goods (SUBMIT) — precondition leaf goodsValueUsd gte 500; expectedResult "Declaration received; assessment issued."
+   458→  * act.pay-duty (PAY) — precondition leaf goodsValueUsd gte 500; expectedResult "Duty paid; receipt issued; release authorized."
+   459→  * act.present-passport (SUBMIT) — precondition leaf nationality exists (operator 'exists', value true); expectedResult "Traveler identity verified."
+   460→  Each action carries kind, preconditions (ConditionNode tree), executionHint, expectedResult.
+   461→- Step 7 (border-crossing-situation.ts): Built the SITUATION package. Manifest: packageId 'pkg.situation.border-crossing', version '1.0.0', category 'SITUATION', dependencies on jur.ghana, jur.togo, jur.ecowas, jur.afcfta, pkg.domain.customs-trade (5 deps). domains ['customs-trade'], situations ['sit.border-crossing']. One situation sit.border-crossing with 6 states (APPROACH → ORIGIN_EXIT → TRANSITION → DESTINATION_ENTRY → CUSTOMS → COMPLETION terminal), 5 transitions (each with event name; the CUSTOMS→COMPLETION transition carries requiredFacts ['goodsValueUsd']), entryConditions (leaf nationality exists), exitConditions (leaf cleared eq true), requiredFacts [nationality, destinationCountry, goodsValueUsd, goodsPurpose, hasProhibitedGoods], applicableDomains ['customs-trade'], actors [traveler, origin_immigration_officer, destination_immigration_officer, customs_officer], procedures ['proc.border-crossing.standard'], possibleActions [act.present-passport, act.declare-goods, act.pay-duty], exceptionPaths ['proc.border-crossing.exception-prohibited-goods']. Two procedures:
+   462→  * proc.border-crossing.standard (6 steps): step.approach → step.origin-immigration (requiredDocs passport, expectedOutputs exit-stamp) → step.transition → step.destination-immigration (requiredDocs passport, expectedOutputs entry-stamp) → step.customs (requiredDocuments [goods-declaration, passport-only], acceptedAlternatives [oral-declaration-for-personal-effects], fees [{Customs duty (if applicable), 0, USD}], exceptionPath proc.border-crossing.exception-prohibited-goods) → step.completion (terminal).
+   463→  * proc.border-crossing.exception-prohibited-goods (3 steps): step.detention (requiredDocs detention-notice) → step.investigation (requiredDocs detention-notice + goods-declaration) → step.referral (terminal; requiredDocs investigation-report + detention-notice).
+   464→- Step 8 (src/packages/loader.ts): Built the package loader. Exports `LoadedPackage` interface (manifest, jurisdictions, jurisdictionEdges, authorities, sources, rules, situations, procedures, actions, evidence) and `loadBuiltinPackages(): LoadedPackage[]` — a pure function that imports every package data module under src/lib/packages-data and assembles them into a flat list of 7 LoadedPackage records in dependency-friendly order (base-kernel → jurisdictions → domain → situation). The loader does NOT mutate the source module-level constants (per I10); it only reads them.
+   465→- Step 9 (src/packages/registry/PackageRegistry.ts): Implemented the FROZEN PackageRegistry interface from @/kernel/contracts/contracts. Constructor takes LoadedPackage[]; builds an internal JurisdictionGraph via `createJurisdictionGraph()` from @/kernel/jurisdiction/JurisdictionGraph (Task 4's kernel implementation), populated with every jurisdiction + edge from every loaded package — this assembles cross-package lineage correctly (e.g., ECOWAS's DERIVES_FROM edges linking jur.ghana/jur.togo to jur.ecowas, AfCFTA's DERIVES_FROM edges from jur.ecowas/jur.ghana/jur.togo to jur.afcfta). Implements: listPackages(category?), getPackage(packageId), listRules(packageId?), listSituations(packageId?), listProcedures(situationId?), listActions(packageId?), listJurisdictions(packageId?), listAuthorities(packageId?), listSources(packageId?), listEvidence(), and the `jurisdictionGraph` getter. All flatten across packages with optional packageId (or situationId for listProcedures) filtering. Exports `createPackageRegistry()` factory that calls `loadBuiltinPackages()` and constructs the registry — the canonical entry point for the API layer / engines. NO `any` types — every type comes from `@/kernel/primitives/types` or `@/kernel/contracts/contracts` via type-only imports.
+   466→- Step 10 (smoke verification — not a deliverable test, just a manual check): Loaded the registry via `bun -e` and confirmed: 7 packages (1 CAPABILITY + 4 JURISDICTION + 1 DOMAIN + 1 SITUATION), 6 rules (3 ECOWAS + 3 AfCFTA), 10 jurisdictions (1 global + 3 Ghana + 3 Togo + 2 ECOWAS + 1 AfCFTA), 9 authorities, 9 sources, 1 situation, 2 procedures (standard with 6 steps + exception with 3 steps), 3 actions. Cross-package lineage works: `applicableFor(['jur.ghana'], '2025-01-15')` returns jur.ghana + jur.ecowas + jur.afcfta (the DERIVES_FROM chain assembles correctly across packages). `ancestors('jur.ghana.region.volta')` returns jur.ghana + jur.ecowas + jur.afcfta (parentIds + APPLIES_TO edge + DERIVES_FROM chain all resolved).
+   467→- Step 11 (lint): `bun run lint` → 0 errors, 0 warnings. Also ran `bunx tsc --noEmit -p tsconfig.json` filtered for my files (src/lib/packages-data/, src/packages/loader.ts, src/packages/registry/PackageRegistry.ts) → 0 errors. The only remaining project-wide TS errors are pre-existing in `examples/websocket/` (missing socket.io modules — eslint-ignored) and `skills/` (out of scope).
+   468→
+   469→Stage Summary:
+   470→- Files produced (9 total):
+   471→  - src/lib/packages-data/base-kernel-capability.ts (CAPABILITY — 1 implicit global jurisdiction + 1 fallback authority + 1 fallback source)
+   472→  - src/lib/packages-data/ghana-jurisdiction.ts (JURISDICTION — 3 jurisdictions + 3 authorities + 3 sources + 2 APPLIES_TO edges)
+   473→  - src/lib/packages-data/togo-jurisdiction.ts (JURISDICTION — 3 jurisdictions + 3 authorities + 3 sources + 2 APPLIES_TO edges)
+   474→  - src/lib/packages-data/ecowas-jurisdiction.ts (SUPRANATIONAL JURISDICTION — 2 jurisdictions + 1 authority + 1 source + 3 cross-package edges + 3 DETERMINISTIC T0 rules)
+   475→  - src/lib/packages-data/afcfta-jurisdiction.ts (SUPRANATIONAL JURISDICTION — 1 jurisdiction + 1 authority + 1 source + 3 cross-package edges + 3 DETERMINISTIC T0 rules)
+   476→  - src/lib/packages-data/customs-trade-domain.ts (DOMAIN — 3 actions: declare-goods, pay-duty, present-passport)
+   477→  - src/lib/packages-data/border-crossing-situation.ts (SITUATION — 1 situation state machine + 2 procedures: standard 6-step + exception 3-step)
+   478→  - src/packages/loader.ts (LoadedPackage interface + loadBuiltinPackages() returning 7 packages)
+   479→  - src/packages/registry/PackageRegistry.ts (PackageRegistry class implementing the FROZEN contract + createPackageRegistry() factory using the kernel JurisdictionGraph)
+   480→- Knowledge artefacts defined across all packages: 10 jurisdictions (1 global + 6 national/regional/municipal + 3 supranational), 5 cross-jurisdiction edges (4 DERIVES_FROM + 1 APPLIES_TO for fm-protocol) + 4 intra-package APPLIES_TO edges (Volta→Ghana, Aflao→Volta, Plateaux→Togo, Sanvéga→Plateaux), 9 authorities, 9 sources, 6 DETERMINISTIC T0 rules (3 ECOWAS + 3 AfCFTA), 1 situation (6 states, 5 transitions), 2 procedures (6 + 3 steps = 9 total steps), 3 actions.
+   481→- Decisions / deviations:
+   482→  - Used dotted IDs (e.g., `jur.ghana`, `rule.ecowas.fm.art3`) as specified in the task description rather than the colon-separated IDs in the golden fixture (`jur:gh`, `rule:ecowas.free_movement.protocol_art_3`). The task description is the authoritative instruction; the golden fixture is a behavioural reference (the rule FIRING behaviour — what conditions match, what effects fire — is preserved). The rule effect codes (e.g., RIGHT_DEMINIMIS_EXEMPT, FEE_CUSTOMS_DUTY) follow the task spec.
+   483→  - Used the ECOWAS member-state list exactly as given in the task (`['GH','NG','TG','CI','SN','ML','BF','BJ','NE','GU','SL','LR','CV','GM','MR']`) rather than substituting a "corrected" list. The task is explicit about the list; corrections are a content-author concern.
+   484→  - The afcfta.duty.commercial rule's OBLIGATION effect does NOT carry `authorityId` on the effect itself (RuleEffect has no authorityId field per the FROZEN types). Instead, the Rule itself carries `authorityId: 'auth.afcfta.secretariat'`, and the StateEngine (Task 4) will derive the Obligation's authorityId from the Rule when constructing the StateSnapshot. Documented this in a code comment.
+   485→  - The `requiredDocuments: ['goods-declaration' OR 'passport-only']` in the spec was encoded as `requiredDocuments: ['goods-declaration', 'passport-only']` — the list semantics already represent "any one of" (the procedure engine interprets the list as alternatives). The `acceptedAlternatives: ['oral-declaration-for-personal-effects']` is preserved as a separate field per the ProcedureStep contract.
+   486→  - The InMemoryJurisdictionGraph I had originally drafted as a local fallback was REPLACED mid-task with the kernel implementation at @/kernel/jurisdiction/JurisdictionGraph (Task 4 shipped it during this run). The registry now imports `createJurisdictionGraph` from there directly, per the task description ("Builds an internal JurisdictionGraph (from @/kernel/jurisdiction/JurisdictionGraph)").
+   487→  - All package data is module-level `const` exports (immutable after publication — I10). The loader does NOT mutate them; it only reads and assembles into LoadedPackage records. No `any` types — every type comes from `@/kernel/primitives/types` (or `@/kernel/contracts/contracts` for the registry's JurisdictionGraph and PackageRegistry interfaces) via type-only imports.
+   488→  - Did NOT touch src/kernel/, src/app/, or src/platform/. Only added new files under src/lib/packages-data/, src/packages/loader.ts, and src/packages/registry/PackageRegistry.ts.
+   489→- Lint result: `bun run lint` → 0 errors, 0 warnings. `bunx tsc --noEmit -p tsconfig.json` filtered for my files → 0 errors. Smoke test via `bun -e` confirms the loader + registry + cross-package JurisdictionGraph lineage all function correctly.
+   490→

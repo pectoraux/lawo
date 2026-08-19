@@ -1,0 +1,318 @@
+{
+  "fixtureId": "fixture:border_crossing_golden_01",
+  "fixtureVersion": 1,
+  "description": "Golden decision fixture: Ghana national driving a private car across the Aflao border into Togo, carrying personal effects under USD 500 with no restricted items. Exercises the ECOWAS Protocol on Free Movement of Persons and the AfCFTA tariff concession for personal effects. Reproducible across runs (per I13).",
+  "asOf": "2025-01-15",
+  "packages": {
+    "required": [
+      { "packageId": "pkg:kernel.base", "versionRange": "^1.0.0" },
+      { "packageId": "pkg:jur.ghana", "versionRange": "^1.0.0" },
+      { "packageId": "pkg:jur.togo", "versionRange": "^1.0.0" },
+      { "packageId": "pkg:jur.ecowas", "versionRange": "^1.0.0" },
+      { "packageId": "pkg:jur.afcfta", "versionRange": "^1.0.0" },
+      { "packageId": "pkg:dom.customs", "versionRange": "^1.0.0" },
+      { "packageId": "pkg:sit.border_crossing", "versionRange": "^1.0.0" }
+    ]
+  },
+  "input": {
+    "request": {
+      "subjectId": "subj:traveler_gh_001",
+      "locationId": "place:aflao_border_post",
+      "asOf": "2025-01-15",
+      "situationId": "sit:border_crossing",
+      "tenantId": null,
+      "objective": "cross from Ghana into Togo lawfully with personal effects",
+      "jurisdictionIds": [
+        "jur:gh",
+        "jur:tg",
+        "jur:ecowas",
+        "jur:afcfta"
+      ]
+    },
+    "facts": [
+      {
+        "id": "fact:traveler_gh_001.nationality",
+        "subjectId": "subj:traveler_gh_001",
+        "attribute": "traveler.nationality",
+        "value": "GH",
+        "truthLevel": "T0",
+        "observedAt": "2025-01-15",
+        "tenantId": null,
+        "jurisdictionId": "jur:gh"
+      },
+      {
+        "id": "fact:traveler_gh_001.vehicle_type",
+        "subjectId": "subj:traveler_gh_001",
+        "attribute": "vehicle.type",
+        "value": "private_car",
+        "truthLevel": "T1",
+        "observedAt": "2025-01-15",
+        "tenantId": null,
+        "jurisdictionId": "jur:gh"
+      },
+      {
+        "id": "fact:traveler_gh_001.crossing_point",
+        "subjectId": "subj:traveler_gh_001",
+        "attribute": "border.crossing_point",
+        "value": "Aflao",
+        "truthLevel": "T0",
+        "observedAt": "2025-01-15",
+        "tenantId": null,
+        "jurisdictionId": "jur:gh"
+      },
+      {
+        "id": "fact:traveler_gh_001.destination",
+        "subjectId": "subj:traveler_gh_001",
+        "attribute": "traveler.destination_country",
+        "value": "TG",
+        "truthLevel": "T0",
+        "observedAt": "2025-01-15",
+        "tenantId": null,
+        "jurisdictionId": "jur:gh"
+      },
+      {
+        "id": "fact:goods_001.category",
+        "subjectId": "subj:traveler_gh_001",
+        "attribute": "goods.category",
+        "value": "personal_effects",
+        "truthLevel": "T1",
+        "observedAt": "2025-01-15",
+        "tenantId": null,
+        "jurisdictionId": "jur:gh"
+      },
+      {
+        "id": "fact:goods_001.total_value_usd",
+        "subjectId": "subj:traveler_gh_001",
+        "attribute": "goods.total_value_usd",
+        "value": 320,
+        "truthLevel": "T1",
+        "observedAt": "2025-01-15",
+        "tenantId": null,
+        "jurisdictionId": "jur:gh"
+      },
+      {
+        "id": "fact:goods_001.restricted_items_present",
+        "subjectId": "subj:traveler_gh_001",
+        "attribute": "goods.restricted_items_present",
+        "value": false,
+        "truthLevel": "T1",
+        "observedAt": "2025-01-15",
+        "tenantId": null,
+        "jurisdictionId": "jur:gh"
+      },
+      {
+        "id": "fact:traveler_gh_001.commercial_purpose",
+        "subjectId": "subj:traveler_gh_001",
+        "attribute": "traveler.commercial_purpose",
+        "value": false,
+        "truthLevel": "T1",
+        "observedAt": "2025-01-15",
+        "tenantId": null,
+        "jurisdictionId": "jur:gh"
+      },
+      {
+        "id": "fact:traveler_gh_001.ecowas_member_nationality",
+        "subjectId": "subj:traveler_gh_001",
+        "attribute": "traveler.ecowas_member_nationality",
+        "value": true,
+        "truthLevel": "T0",
+        "observedAt": "2025-01-15",
+        "tenantId": null,
+        "jurisdictionId": "jur:ecowas"
+      }
+    ]
+  },
+  "expected": {
+    "applicableJurisdictions": [
+      "jur:gh",
+      "jur:tg",
+      "jur:ecowas",
+      "jur:afcfta"
+    ],
+    "applicableAuthorities": [
+      "auth:gh_ministry_of_interior",
+      "auth:tg_douanes",
+      "auth:ecowas_commission",
+      "auth:afcfta_secretariat"
+    ],
+    "firedRules": [
+      {
+        "ruleId": "rule:ecowas.free_movement.protocol_art_3",
+        "matched": true,
+        "skippedDueToException": false,
+        "truthLevel": "T0",
+        "firedEffects": [
+          {
+            "kind": "RIGHT",
+            "code": "RIGHT_ECOWAS_FREE_MOVEMENT",
+            "label": "Right to free movement within ECOWAS for member-state nationals"
+          }
+        ]
+      },
+      {
+        "ruleId": "rule:afcfta.personal_effects.de_minimis",
+        "matched": true,
+        "skippedDueToException": false,
+        "truthLevel": "T0",
+        "firedEffects": [
+          {
+            "kind": "RIGHT",
+            "code": "RIGHT_DE_MINIMIS_EXEMPTION",
+            "label": "De minimis exemption for personal effects under USD 500"
+          },
+          {
+            "kind": "FEE",
+            "code": "FEE_ADMIN_PROCESSING",
+            "label": "Administrative processing fee",
+            "amount": {
+              "value": 0,
+              "currency": "USD",
+              "basis": "waived_under_de_minimis"
+            }
+          }
+        ]
+      }
+    ],
+    "nonFiredRules": [
+      {
+        "ruleId": "rule:afcfta.commercial_goods.tariff",
+        "matched": false,
+        "skippedDueToException": false,
+        "reason": "conditions.goods.category eq personal_effects is true but conditions.traveler.commercial_purpose eq true is false"
+      }
+    ],
+    "stateSnapshot": {
+      "situationId": "sit:border_crossing",
+      "subjectId": "subj:traveler_gh_001",
+      "jurisdictionIds": [
+        "jur:gh",
+        "jur:tg",
+        "jur:ecowas",
+        "jur:afcfta"
+      ],
+      "asOf": "2025-01-15",
+      "rights": [
+        {
+          "id": "right:ecowas_free_movement",
+          "code": "RIGHT_ECOWAS_FREE_MOVEMENT",
+          "label": "Right to free movement within ECOWAS for member-state nationals"
+        },
+        {
+          "id": "right:de_minimis_exemption",
+          "code": "RIGHT_DE_MINIMIS_EXEMPTION",
+          "label": "De minimis exemption for personal effects under USD 500"
+        }
+      ],
+      "obligations": [],
+      "permissions": [
+        {
+          "id": "perm:proceed_to_destination_entry",
+          "code": "PERMISSION_PROCEED_DESTINATION_ENTRY",
+          "label": "Permission to proceed to the Togo destination-entry checkpoint"
+        }
+      ],
+      "restrictions": [],
+      "options": [
+        {
+          "id": "opt:proceed_to_immigration",
+          "code": "OPTION_PROCEED_IMMIGRATION",
+          "label": "Proceed to immigration at the Togo side of Aflao",
+          "actionId": "act:proceed_immigration_tg"
+        },
+        {
+          "id": "opt:declare_goods_voluntarily",
+          "code": "OPTION_DECLARE_GOODS_VOLUNTARILY",
+          "label": "Voluntarily declare goods at customs (optional under de minimis)",
+          "actionId": "act:declare_goods_customs_tg"
+        }
+      ],
+      "firedEffectsCount": 3,
+      "truthLevel": "T0"
+    },
+    "provenanceChain": [
+      {
+        "decisionId": "decision:border_crossing_golden_01",
+        "ruleId": "rule:ecowas.free_movement.protocol_art_3",
+        "ruleVersion": 1,
+        "source": {
+          "sourceId": "src:ecowas.protocol_on_free_movement_of_persons.1979",
+          "citation": "ECOWAS Protocol A/P.1/5/79 on Free Movement of Persons, Residence and Establishment, Article 3",
+          "url": "https://archive.ecowas.int/protocols/AP15979"
+        },
+        "authority": {
+          "authorityId": "auth:ecowas_commission",
+          "name": "ECOWAS Commission",
+          "jurisdictionId": "jur:ecowas"
+        },
+        "facts": [
+          { "factId": "fact:traveler_gh_001.ecowas_member_nationality", "subjectId": "subj:traveler_gh_001", "attribute": "traveler.ecowas_member_nationality", "value": true, "truthLevel": "T0" },
+          { "factId": "fact:traveler_gh_001.nationality", "subjectId": "subj:traveler_gh_001", "attribute": "traveler.nationality", "value": "GH", "truthLevel": "T0" }
+        ],
+        "evidence": [],
+        "calculation": [
+          { "description": "Evaluate leaf: traveler.ecowas_member_nationality eq true", "input": { "fact": "traveler.ecowas_member_nationality", "operator": "eq", "value": true }, "output": true, "ruleClause": "conditions[0]" },
+          { "description": "Evaluate and: all children true", "input": [true], "output": true, "ruleClause": "conditions" },
+          { "description": "Exceptions array empty", "input": [], "output": false, "ruleClause": "exceptions" },
+          { "description": "Rule matched", "input": { "conditions": true, "exceptions": false }, "output": true }
+        ],
+        "assumptions": [],
+        "truthLevel": "T0",
+        "asOf": "2025-01-15"
+      },
+      {
+        "decisionId": "decision:border_crossing_golden_01",
+        "ruleId": "rule:afcfta.personal_effects.de_minimis",
+        "ruleVersion": 1,
+        "source": {
+          "sourceId": "src:afcfta.protocol_on_tariff_concessions.article_4",
+          "citation": "AfCFTA Protocol on Tariff Concessions, Article 4 (de minimis)",
+          "url": "https://www.afcfta.au.int/protocols/tariff_concessions"
+        },
+        "authority": {
+          "authorityId": "auth:afcfta_secretariat",
+          "name": "AfCFTA Secretariat",
+          "jurisdictionId": "jur:afcfta"
+        },
+        "facts": [
+          { "factId": "fact:goods_001.category", "subjectId": "subj:traveler_gh_001", "attribute": "goods.category", "value": "personal_effects", "truthLevel": "T1" },
+          { "factId": "fact:goods_001.total_value_usd", "subjectId": "subj:traveler_gh_001", "attribute": "goods.total_value_usd", "value": 320, "truthLevel": "T1" },
+          { "factId": "fact:goods_001.restricted_items_present", "subjectId": "subj:traveler_gh_001", "attribute": "goods.restricted_items_present", "value": false, "truthLevel": "T1" },
+          { "factId": "fact:traveler_gh_001.commercial_purpose", "subjectId": "subj:traveler_gh_001", "attribute": "traveler.commercial_purpose", "value": false, "truthLevel": "T1" }
+        ],
+        "evidence": [],
+        "calculation": [
+          { "description": "Evaluate leaf: goods.category eq personal_effects", "input": { "fact": "goods.category", "operator": "eq", "value": "personal_effects" }, "output": true, "ruleClause": "conditions[0]" },
+          { "description": "Evaluate leaf: goods.total_value_usd lt 500", "input": { "fact": "goods.total_value_usd", "operator": "lt", "value": 500 }, "output": true, "ruleClause": "conditions[1]" },
+          { "description": "Evaluate leaf: goods.restricted_items_present eq false", "input": { "fact": "goods.restricted_items_present", "operator": "eq", "value": false }, "output": true, "ruleClause": "conditions[2]" },
+          { "description": "Evaluate and: all three children true", "input": [true, true, true], "output": true, "ruleClause": "conditions" },
+          { "description": "Evaluate exception: or(traveler.commercial_purpose eq true, goods.restricted_items_present eq true)", "input": [false, false], "output": false, "ruleClause": "exceptions[0]" },
+          { "description": "Rule matched (conditions true, no exception true)", "input": { "conditions": true, "exceptions": false }, "output": true }
+        ],
+        "assumptions": [
+          "USD valuation accepted at border for de minimis threshold"
+        ],
+        "truthLevel": "T0",
+        "asOf": "2025-01-15"
+      }
+    ],
+    "auditEvents": [
+      {
+        "action": "DECISION_PRODUCED",
+        "severity": "INFO",
+        "payload": {
+          "decisionId": "decision:border_crossing_golden_01",
+          "firedRuleCount": 2,
+          "subjectId": "subj:traveler_gh_001",
+          "situationId": "sit:border_crossing",
+          "asOf": "2025-01-15"
+        }
+      }
+    ]
+  },
+  "reproducibility": {
+    "deterministic": true,
+    "invariant": "I13",
+    "note": "Re-running the DecisionEngine with the same input request and the same package versions MUST produce byte-identical state, provenance (modulo producedAt timestamps), and audit events (modulo event ids and timestamps). Any diff MUST be flagged explicitly per section 21; never silently accepted.",
+    "idempotencyKey": "decision:border_crossing_golden_01"
+  }
+}

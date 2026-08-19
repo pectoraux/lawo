@@ -1,0 +1,194 @@
+// =============================================================================
+// Nomos — Platform Foundation Schema (Plane E)
+// =============================================================================
+// This schema implements the domain-agnostic kernel persistence layer.
+// All types are SQLite-compatible: no native enums (allowed values documented
+// inline), no Json-array columns (lists are stored as JSON-encoded String).
+//
+// Vertical/domain concepts (InsuranceClaim, ADU, AfCFTAShipment, etc.) live
+// in package data and are NEVER represented as Prisma models. They are
+// serialized into the appropriate *Json String fields below (stateJson,
+// provenanceJson, payloadJson, manifestJson, ruleJson, etc.).
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Tenant — a single actor scope. A tenant may be an individual, a household,
+// a business, or any other principal that owns data.
+//
+// `kind` allowed values (String, SQLite has no native enum):
+//   INDIVIDUAL | HOUSEHOLD | SMALL_BUSINESS | ENTERPRISE | PROFESSIONAL_ORG |
+//   GOVERNMENT | EMBEDDED
+// -----------------------------------------------------------------------------
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  kind      String   // see allowed values above
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations (kept unobtrusive; FK lookups still available via these)
+  auditEvents AuditEvent[]
+  decisions   DecisionRecord[]
+  facts       FactRecord[]
+  evidence    EvidenceRecord[]
+}
+
+// -----------------------------------------------------------------------------
+// AuditEvent — append-only audit log entry.
+//
+// `severity` allowed values: INFO | WARN | ERROR | CRITICAL
+// `payloadJson` is a JSON-encoded `Record<string, unknown>` (AuditEvent.payload).
+// -----------------------------------------------------------------------------
+model AuditEvent {
+  id          String   @id @default(cuid())
+  tenantId    String?  // nullable: null = GLOBAL (public knowledge)
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+  actor       String   // who/what performed the action (userId, system, etc.)
+  action      String   // e.g. "decision.compute", "package.ingest"
+  subjectId   String?  // the entity/decision/rule the action acted upon
+  timestamp   DateTime @default(now())
+  severity    String   // INFO | WARN | ERROR | CRITICAL
+  payloadJson String   // JSON-encoded AuditEvent.payload object
+
+  @@index([tenantId, timestamp])
+}
+
+// -----------------------------------------------------------------------------
+// DecisionRecord — a persisted StateSnapshot decision with full provenance.
+//
+// `stateJson`       : full StateSnapshot serialized as JSON.
+// `provenanceJson`  : array of Provenance serialized as JSON.
+// `truthLevel`      : T0 | T1 | T2 | T3 | T4 | T5 (TruthLevel)
+// -----------------------------------------------------------------------------
+model DecisionRecord {
+  id             String   @id @default(cuid())
+  tenantId       String?
+  tenant         Tenant?  @relation(fields: [tenantId], references: [id])
+  subjectId     String
+  situationId   String?
+  stateJson     String   // full StateSnapshot serialized
+  provenanceJson String  // JSON array of Provenance
+  asOf          DateTime
+  computedAt    DateTime
+  truthLevel    String   // T0 | T1 | T2 | T3 | T4 | T5
+
+  @@index([tenantId, computedAt])
+}
+
+// -----------------------------------------------------------------------------
+// PackageRecord — a versioned package manifest in the registry.
+//
+// `category` allowed values: JURISDICTION | DOMAIN | SITUATION | CAPABILITY
+// `manifestJson` : full PackageManifest serialized as JSON.
+// -----------------------------------------------------------------------------
+model PackageRecord {
+  packageId   String   @unique
+  name        String
+  version     String
+  category    String   // JURISDICTION | DOMAIN | SITUATION | CAPABILITY
+  manifestJson String   // full PackageManifest serialized
+  publishedAt DateTime
+  signedBy    String
+  hash        String
+
+  @@unique([packageId, version])
+}
+
+// -----------------------------------------------------------------------------
+// RuleVersion — an immutable, versioned Rule.
+//
+// `ruleJson`       : full Rule serialized as JSON (includes RuleIR).
+// `validFrom`      : when this version becomes effective.
+// `validTo`        : when this version stops being effective (null = open-ended).
+// `supersedes`     : prior ruleId+version that this replaces.
+// `supersededBy`   : future ruleId+version that replaces this.
+// -----------------------------------------------------------------------------
+model RuleVersion {
+  id           String   @id @default(cuid())
+  ruleId       String
+  version      Int
+  ruleJson     String   // full Rule serialized
+  jurisdictionId String
+  authorityId  String
+  sourceId     String
+  packageId    String
+  validFrom    DateTime
+  validTo      DateTime?
+  supersedes   String?
+  supersededBy String?
+  publishedAt  DateTime
+  ingestedAt   DateTime
+
+  @@unique([ruleId, version])
+  @@index([jurisdictionId, validFrom])
+}
+
+// -----------------------------------------------------------------------------
+// JurisdictionRecord — a node in the jurisdiction graph.
+//
+// `parentIdsJson` : JSON array of parent jurisdiction ids (string[]).
+// `kind`          : COUNTRY | REGION | STATE | MUNICIPALITY | REGULATOR | COURT |
+//                   SPECIAL_ZONE | FREE_ZONE | SUPRANATIONAL | BILATERAL | INTERNATIONAL
+// -----------------------------------------------------------------------------
+model JurisdictionRecord {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  kind          String   // see allowed values above
+  parentIdsJson String   // JSON array of parent ids
+  packageId     String
+  validFrom     DateTime
+  validTo       DateTime?
+  version       Int
+  supersedes    String?
+  supersededBy  String?
+}
+
+// -----------------------------------------------------------------------------
+// FactRecord — a stored observation (entity attribute).
+//
+// `valueJson`  : the fact's value, JSON-encoded.
+// `truthLevel` : T0 | T1 | T2 | T3 | T4 | T5
+// `sourceJson` : optional SourceRef serialized as JSON.
+// -----------------------------------------------------------------------------
+model FactRecord {
+  id            String   @id @default(cuid())
+  subjectId     String
+  attribute     String
+  valueJson     String   // JSON-encoded value
+  truthLevel    String   // T0 | T1 | T2 | T3 | T4 | T5
+  sourceJson    String?  // optional SourceRef serialized as JSON
+  observedAt    DateTime
+  tenantId      String?
+  tenant        Tenant?  @relation(fields: [tenantId], references: [id])
+  jurisdictionId String?
+
+  @@index([subjectId, attribute])
+  @@index([tenantId])
+}
+
+// -----------------------------------------------------------------------------
+// EvidenceRecord — a piece of evidence (e.g. a document/page/region) with
+// extracted facts.
+//
+// `extractedFactIdsJson` : JSON array of FactRecord ids (string[]).
+// -----------------------------------------------------------------------------
+model EvidenceRecord {
+  id                    String   @id @default(cuid())
+  documentId            String?
+  page                  Int?
+  region                String?
+  extractedFactIdsJson  String   // JSON array of fact ids
+  confidence            Float
+  tenantId              String?
+  tenant                Tenant?  @relation(fields: [tenantId], references: [id])
+}
