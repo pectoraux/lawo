@@ -56,6 +56,7 @@ import type {
   Rule,
   RuleIR,
   Source,
+  SourceProposition,
 } from '@/kernel/primitives/types';
 
 // ---------------------------------------------------------------------------
@@ -130,71 +131,69 @@ const conditionUsingPrivateVehicle: ConditionNode = {
 };
 
 // ---------------------------------------------------------------------------
-// Source Proposition Records (Task 2)
+// Source Proposition Records (ADR-0024 — typed sourcePropositions on RuleIR)
 // ---------------------------------------------------------------------------
-// Each rule's RuleIR.definitions carries a SourceProposition record that
-// documents the exact legal proposition, the source, and the verification
-// status. This is NOT the full ADR-0018 observation system — it is the
-// smallest primitive necessary to distinguish MACHINE_VALID from
-// LEGALLY_VERIFIED (Task 4).
+// Each rule's RuleIR.sourcePropositions carries typed SourceProposition
+// records that document the exact legal proposition, the source, and the
+// verification status.
 //
 // Until a proposition is independently verified against an authoritative
 // source by a qualified legal reviewer, the rule's verificationStatus is
-// MACHINE_VALID and its truthLevel is downgraded to T2.
+// MACHINE_VALID and its truthLevel is T2 (not T0).
 // ---------------------------------------------------------------------------
-
-interface SourceProposition {
-  source: string;
-  article: string;
-  proposition: string;
-  jurisdiction: string;
-  effectiveDate: string;
-  evidenceLocation: string;
-  verificationStatus: 'MACHINE_VALID' | 'LEGALLY_VERIFIED';
-  verifiedBy?: string;
-  verifiedAt?: string;
-}
 
 // Proposition: ECOWAS biometric identity card directive
 const PROPOSITION_BIOMETRIC_ID: SourceProposition = {
-  source: 'src.gt-border.biometric-ecowas-2014',
-  article: 'ECOWAS Directive C/DIR.1/08/14, Article 2',
+  sourceId: 'src.gt-border.biometric-ecowas-2014',
+  legalProvision: 'ECOWAS Directive C/DIR.1/08/14, Article 2',
   proposition:
     'ECOWAS member states shall adopt a biometric identity card for their nationals, which may serve as a travel document within the ECOWAS region.',
-  jurisdiction: 'jur.ecowas',
-  effectiveDate: '2014-01-01',
-  evidenceLocation: 'ECOWAS Directive C/DIR.1/08/14 — full text not independently verified against the official ECOWAS gazette. The citation and article reference are based on secondary sources.',
+  jurisdictionId: 'jur.ecowas',
+  effectiveFrom: '2014-01-01',
+  effectiveTo: null,
+  evidenceLocation:
+    'ECOWAS Directive C/DIR.1/08/14 — full text not independently verified against the official ECOWAS gazette. The citation and article reference are based on secondary sources.',
   verificationStatus: 'MACHINE_VALID',
-  // verificationStatus: 'LEGALLY_VERIFIED' — requires independent review against
-  // the authoritative ECOWAS directive text. Not yet completed.
+  verificationNotes:
+    'Requires independent review against the authoritative ECOWAS directive text. Not yet completed.',
+  version: 1,
+  supersedes: null,
 };
 
 // Proposition: Ghana-Togo bilateral vehicle registration protocol
 const PROPOSITION_VEHICLE_REGISTRATION: SourceProposition = {
-  source: 'src.gt-border.vehicle-registration',
-  article: 'Bilateral Protocol, Article 3',
+  sourceId: 'src.gt-border.vehicle-registration',
+  legalProvision: 'Bilateral Protocol, Article 3',
   proposition:
     'Private vehicles registered in an ECOWAS member state may use designated lanes at the Ghana-Togo border, subject to presentation of valid registration documents.',
-  jurisdiction: 'jur.ghana',
-  effectiveDate: '2010-06-15',
-  evidenceLocation: 'Bilateral protocol text not independently verified. The existence of a formal bilateral protocol between Ghana and Togo on vehicle registration has not been confirmed against primary diplomatic records.',
+  jurisdictionId: 'jur.ghana',
+  effectiveFrom: '2010-06-15',
+  effectiveTo: null,
+  evidenceLocation:
+    'Bilateral protocol text not independently verified. The existence of a formal bilateral protocol between Ghana and Togo on vehicle registration has not been confirmed against primary diplomatic records.',
   verificationStatus: 'MACHINE_VALID',
-  // verificationStatus: 'LEGALLY_VERIFIED' — requires verification against the
-  // official bilateral treaty text. Not yet completed.
+  verificationNotes:
+    'Requires verification against the official bilateral treaty text. Not yet completed.',
+  version: 1,
+  supersedes: null,
 };
 
 // Proposition: Document requirement (passport or biometric ID)
 const PROPOSITION_DOCUMENT_REQUIREMENT: SourceProposition = {
-  source: 'src.gt-border.biometric-ecowas-2014',
-  article: 'ECOWAS Directive C/DIR.1/08/14, Article 4',
+  sourceId: 'src.gt-border.biometric-ecowas-2014',
+  legalProvision: 'ECOWAS Directive C/DIR.1/08/14, Article 4',
   proposition:
     'Travelers crossing the Ghana-Togo border must present either a valid passport or a biometric ECOWAS-compatible national identity card.',
-  jurisdiction: 'jur.ecowas',
-  effectiveDate: '2014-01-01',
-  evidenceLocation: 'The specific requirement for the Ghana-Togo border is an interpretation of the general ECOWAS travel document framework. The exact article and provision have not been independently verified against the directive text. The directive may not explicitly name the Ghana-Togo border.',
+  jurisdictionId: 'jur.ecowas',
+  effectiveFrom: '2014-01-01',
+  effectiveTo: null,
+  evidenceLocation:
+    'The specific requirement for the Ghana-Togo border is an interpretation of the general ECOWAS travel document framework. The exact article and provision have not been independently verified against the directive text.',
   verificationStatus: 'MACHINE_VALID',
-  // verificationStatus: 'LEGALLY_VERIFIED' — requires verification that the
-  // directive explicitly requires passport-or-biometric-ID at this border.
+  verificationNotes:
+    'Requires verification that the directive explicitly requires passport-or-biometric-ID at this border.',
+  version: 1,
+  supersedes: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -297,12 +296,7 @@ const RULEIR_GT_BORDER_BIOMETRIC_ID: RuleIR = {
   ],
   references: ['src.gt-border.biometric-ecowas-2014'],
   interpretiveStatus: 'CONTESTED',
-  definitions: {
-    sourceProposition: {
-      term: 'sourceProposition',
-      meaning: JSON.stringify(PROPOSITION_BIOMETRIC_ID),
-    },
-  },
+  sourcePropositions: [PROPOSITION_BIOMETRIC_ID],
 };
 
 const RULEIR_GT_BORDER_VEHICLE_REGISTRATION: RuleIR = {
@@ -328,12 +322,7 @@ const RULEIR_GT_BORDER_VEHICLE_REGISTRATION: RuleIR = {
   ],
   references: ['src.gt-border.vehicle-registration'],
   interpretiveStatus: 'CONTESTED',
-  definitions: {
-    sourceProposition: {
-      term: 'sourceProposition',
-      meaning: JSON.stringify(PROPOSITION_VEHICLE_REGISTRATION),
-    },
-  },
+  sourcePropositions: [PROPOSITION_VEHICLE_REGISTRATION],
 };
 
 const RULEIR_GT_BORDER_DOCUMENT_REQUIREMENT: RuleIR = {
@@ -361,12 +350,7 @@ const RULEIR_GT_BORDER_DOCUMENT_REQUIREMENT: RuleIR = {
   ],
   references: ['src.gt-border.biometric-ecowas-2014'],
   interpretiveStatus: 'CONTESTED',
-  definitions: {
-    sourceProposition: {
-      term: 'sourceProposition',
-      meaning: JSON.stringify(PROPOSITION_DOCUMENT_REQUIREMENT),
-    },
-  },
+  sourcePropositions: [PROPOSITION_DOCUMENT_REQUIREMENT],
 };
 
 // ---------------------------------------------------------------------------

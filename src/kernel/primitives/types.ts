@@ -271,6 +271,15 @@ export interface RuleIR {
   references?: string[];
   /** Interpretive status — distinguishes settled vs contested rules (§12). */
   interpretiveStatus?: 'SETTLED' | 'CONTESTED' | 'AMBIGUOUS';
+  /**
+   * Source propositions — formal legal evidence records (ADR-0024).
+   * Optional: legacy packages published before ADR-0024 do not have this field.
+   * When present, enables runtime certification verification:
+   *   - T0 rules require at least one LEGALLY_VERIFIED proposition
+   *   - Each proposition links the rule to an authoritative source + provision
+   *   - Propositions are versioned for historical reproducibility (I13)
+   */
+  sourcePropositions?: SourceProposition[];
 }
 
 /**
@@ -308,6 +317,50 @@ export interface RuleEffect {
 export interface Definition {
   term: string;
   meaning: string;
+}
+
+/**
+ * SourceProposition — a formal legal evidence record (ADR-0024).
+ *
+ * Links a Rule to an authoritative legal source + provision, with a
+ * verification status that distinguishes MACHINE_VALID (structurally
+ * sound, not yet verified) from LEGALLY_VERIFIED (independently verified
+ * against an authoritative source by a qualified reviewer).
+ *
+ * A rule may claim truthLevel T0 ONLY when it has at least one
+ * SourceProposition with verificationStatus === 'LEGALLY_VERIFIED'.
+ *
+ * Propositions are versioned (version + supersedes) for historical
+ * reproducibility (I13): a corrected interpretation creates a new version,
+ * not a patch to the existing one.
+ */
+export interface SourceProposition {
+  /** The source this proposition is derived from (references Source.id). */
+  sourceId: string;
+  /** The exact legal provision (e.g., "Article 3", "Section 2(1)"). */
+  legalProvision: string;
+  /** The exact legal proposition being asserted (plain text, not RuleIR). */
+  proposition: string;
+  /** The jurisdiction under which this proposition has force. */
+  jurisdictionId: string;
+  /** When this proposition became legally effective (ISO date). */
+  effectiveFrom: string;
+  /** When this proposition ceased to be effective (ISO date, or null = ongoing). */
+  effectiveTo?: string | null;
+  /** Where the evidence was found (page, URL, gazette reference). */
+  evidenceLocation: string;
+  /** Whether this proposition has been verified against an authoritative source. */
+  verificationStatus: 'MACHINE_VALID' | 'LEGALLY_VERIFIED';
+  /** Identity of the verifier (reviewer name, certification authority ID, or platform verifier ID). */
+  verifiedBy?: string;
+  /** ISO timestamp of verification. */
+  verifiedAt?: string;
+  /** Reviewer notes (what was checked, what was found). */
+  verificationNotes?: string;
+  /** Monotonically increasing per proposition (for historical reproducibility, I13). */
+  version: number;
+  /** The previous version's ID (if this proposition corrects a prior version). */
+  supersedes?: string | null;
 }
 
 /**

@@ -1340,45 +1340,52 @@ function checkRule015(): CheckResult {
 }
 
 function checkRule016(): CheckResult {
-  // RULE-016: A rule with truthLevel T0 MUST have a sourceProposition in its
-  // definitions with verificationStatus 'LEGALLY_VERIFIED'. This prevents
-  // unverified rules from claiming T0 (Authoritative) merely because their
-  // RuleIR passes structural validation. (ADR-0023, I8)
-  const pkgDataDir = path.join(ROOT, 'src', 'lib', 'packages-data');
-  if (!fs.existsSync(pkgDataDir)) {
-    return { id: 'RULE-016', name: 't0-requires-verified-source', passed: true };
-  }
-  const files = walkTsFiles(pkgDataDir);
-  const violations: string[] = [];
-  for (const f of files) {
-    const src = readFileText(f);
-    // Find all Rule objects in this file. A rule claims T0 when:
-    //   truthLevel: 'T0'
-    // AND the rule's definitions do NOT contain verificationStatus: 'LEGALLY_VERIFIED'.
-    //
-    // We scan for truthLevel: 'T0' patterns and check if the same file
-    // contains a LEGALLY_VERIFIED marker near the rule's definitions.
-    //
-    // This is a heuristic static check — the full verification requires
-    // loading the package and inspecting the RuleIR at runtime. But the
-    // static check catches the most common violation: a rule with T0
-    // but no SourceProposition at all.
-    //
-    // Exception: rules in jur.ecowas@1.0.0 and jur.afcfta@1.0.0 are
-    // legacy packages published before ADR-0023. They are immutable (I10)
-    // and are NOT modified. The check skips files that don't contain
-    // 'sourceProposition' at all (legacy packages).
-    if (!/sourceProposition/.test(src)) continue; // legacy package — skip
+  // RULE-016: A rule with truthLevel T0 MUST have a sourceProposition with
+  // verificationStatus 'LEGALLY_VERIFIED'. This is a RUNTIME invariant —
+  // we load actual packages and inspect actual Rule objects, not source files.
+  // (ADR-0024, I8)
+  //
+  // Legacy packages (without sourcePropositions on their RuleIR) are
+  // grandfathered: their rules are NOT checked. Only rules that have
+  // sourcePropositions at all are subject to the certification boundary.
+  // A rule that has sourcePropositions but claims T0 without
+  // LEGALLY_VERIFIED is REJECTED.
+  try {
+    // Dynamically import the registry — this loads all built-in packages
+    // and gives us actual Rule objects.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createPackageRegistry } = require('../../src/packages/registry/PackageRegistry');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { verifyRuleCertification } = require('../../src/kernel/rules/RuleCertificationVerifier');
+    const registry = createPackageRegistry();
+    const rules = registry.listRules();
+    const violations: string[] = [];
 
-    // For files that DO use sourceProposition, verify that no rule claims T0
-    // unless the file also contains LEGALLY_VERIFIED.
-    if (/truthLevel:\s*['"]T0['"]/.test(src) && !/LEGALLY_VERIFIED/.test(src)) {
-      violations.push(`${relative(ROOT, f)}: claims T0 but has no LEGALLY_VERIFIED sourceProposition`);
+    for (const rule of rules) {
+      // Only check rules that have sourcePropositions (new packages).
+      // Legacy packages without sourcePropositions are grandfathered (I10).
+      if (!rule.ruleIr.sourcePropositions || rule.ruleIr.sourcePropositions.length === 0) {
+        continue;
+      }
+
+      const result = verifyRuleCertification(rule);
+      if (!result.certified) {
+        violations.push(...result.violations);
+      }
     }
+
+    return violations.length === 0
+      ? { id: 'RULE-016', name: 't0-requires-verified-source', passed: true }
+      : { id: 'RULE-016', name: 't0-requires-verified-source', passed: false, details: violations.join('\n  ') };
+  } catch (err) {
+    // If the registry can't be loaded (e.g., missing dependency), fail closed.
+    return {
+      id: 'RULE-016',
+      name: 't0-requires-verified-source',
+      passed: false,
+      details: `Runtime verification failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
-  return violations.length === 0
-    ? { id: 'RULE-016', name: 't0-requires-verified-source', passed: true }
-    : { id: 'RULE-016', name: 't0-requires-verified-source', passed: false, details: violations.join('\n  ') };
 }
 
 // ===========================================================================

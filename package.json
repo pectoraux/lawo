@@ -23,7 +23,8 @@
     "test:historical": "bun run tests/historical-reproducibility/run.ts",
     "test:semver": "bun run tests/semver/run.ts",
     "test:ghana-togo": "bun run tests/ghana-togo-integration/run.ts",
-    "test:all": "bun run test:ruleir && bun run test:compiler && bun run test:engine && bun run test:golden && bun run test:package && bun run test:deps && bun run test:historical && bun run test:semver && bun run test:ghana-togo && bun run arch-test && bun run runtime-test"
+    "test:certification": "bun run tests/certification/run.ts",
+    "test:all": "bun run test:ruleir && bun run test:compiler && bun run test:engine && bun run test:golden && bun run test:package && bun run test:deps && bun run test:historical && bun run test:semver && bun run test:ghana-togo && bun run test:certification && bun run arch-test && bun run runtime-test"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
