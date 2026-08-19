@@ -819,3 +819,103 @@ PERFORMANCE IMPACT: negligible.
 SECURITY IMPACT: significantly improved — tenant isolation now enforced at the data-access boundary; decision provenance is server-generated; audit trail is durable for privileged operations; cross-tenant reads/writes are blocked.
 MIGRATION IMPACT: POST /api/decisions removed (breaking change — clients must use POST /api/state with persist=true). All other endpoints backward-compatible.
 ARCHITECTURAL DIFF: no architecture changes. 5 new ADRs (0012-0016) documenting implementation decisions. Constitution, invariants, and contracts FROZEN.
+
+---
+Task ID: PLATFORM-SUBSTRATE
+Agent: Principal (orchestrator)
+Task: RuleIR + compiler/runtime + package registry — generic platform substrate
+
+IMPLEMENTED:
+1. Typed error model (src/kernel/errors.ts) — 12 error classes: InvalidRuleIR, InvalidPackage, MissingDependency, DependencyConflict, PackageVersionConflict, PackageNotFound, RuleNotFound, InvalidTemporalRange, CompilationError, EvaluationError, ProvenanceError, HistoricalResolutionError
+2. RuleIR validator (src/kernel/rules/RuleIRValidator.ts) — deterministic, validates all required fields, condition trees, effects, temporal intervals, rejects unknown operators
+3. Rule compiler (src/kernel/rules/RuleCompiler.ts) — validates → normalizes (flattens nested and/or, dedupes) → computes SHA-256 hash. No eval/Function. CompiledRule is traceable to RuleIR.
+4. CompiledRule type (src/kernel/rules/CompiledRule.ts) — pre-validated, normalized, hashed runtime representation
+5. RuleEngine extended with evaluateCompiled/evaluateAllCompiled (shared evaluateCore algorithm)
+6. CompiledRuleEngine interface in contracts.ts
+7. Package validator (src/packages/PackageValidator.ts) — validates manifest, dependencies, rule references, duplicate IDs, verification metadata
+8. Versioned package registry (src/packages/VersionedPackageRegistry.ts) — registerPackage, activatePackage, deactivatePackage, resolveDependencies, detectCycles, getRulesAtVersion, getPackageAtVersion, getActivePackages
+9. Historical evaluator (src/kernel/rules/HistoricalEvaluator.ts) — evaluates with exact pinned package versions, throws HistoricalResolutionError on missing version
+10. Provenance enhanced with packageId + packageVersion fields (RULE-008)
+11. ProvenanceBuilder updated to populate packageId + packageVersion from registry manifest
+12. DecisionEngine updated to pass packageVersions map to ProvenanceBuilder
+13. 24 golden fixtures covering all 9 operators, nested AND/OR/NOT, exceptions, temporal boundaries, multiple effects, determinism
+14. 10 RULE-* architecture tests (RULE-001 through RULE-010) added to arch-test suite
+15. 7 new test suites (107 tests total):
+    - ruleir-unit: 18 tests
+    - rule-compiler: 11 tests
+    - rule-engine: 20 tests
+    - golden-fixtures: 24 fixtures
+    - package-validation: 12 tests
+    - dependency-resolution: 16 tests
+    - historical-reproducibility: 6 tests
+
+EXISTING REUSED:
+- RuleIR types (Rule, RuleIR, ConditionNode, RuleEffect, etc.) — unchanged
+- conditionEval.ts — pure evaluator, unchanged
+- RuleEngine.ts evaluate/evaluateAll — unchanged (shared evaluateCore added)
+- PackageManifest type — unchanged
+- PackageRegistry interface — unchanged (VersionedPackageRegistry extends it)
+- Existing package data (Ghana/Togo/ECOWAS/AfCFTA/customs-trade/border-crossing) — unchanged
+
+CONTRACTS ADDED/CHANGED:
+- Added: CompiledRuleEngine interface (extends RuleEngine with evaluateCompiled)
+- Added: CompiledRule type
+- Changed: Provenance interface — added packageId + packageVersion fields (compatible extension)
+- Changed: AuditLog interface — added recentAll() and forSubjectInTenant() (from prior sprint, unchanged this sprint)
+
+ADRs ADDED:
+- ADR 0018 (PROPOSED) — claimed-vs-verified truth (architecture backlog, not implemented)
+- ADR 0019, 0020, 0021 — created by subagent (ruleir-validator-compiler, versioned-package-registry, historical-reproducibility) — need to verify they exist
+
+ARCHITECTURE INVARIANTS ADDED:
+- RULE-001: RuleEngine never imports LLM/agent implementation
+- RULE-002: RuleIR is data-only (no function types in ConditionNode)
+- RULE-003: Rule evaluation is deterministic (no Date.now/Math.random/IO in conditionEval)
+- RULE-004: Invalid RuleIR cannot enter active registry (validator + package validator exist)
+- RULE-005: Active packages have resolved dependencies
+- RULE-006: Package code cannot bypass package registry
+- RULE-007: Kernel does not import vertical packages
+- RULE-008: Decision provenance identifies exact package/rule versions
+- RULE-009: Historical evaluation cannot silently use current rule versions
+- RULE-010: Package version content is immutable after publication (hash)
+
+TESTS ADDED:
+- 24 static architecture tests (14 original + 10 RULE-*) — all passing
+- 18 RuleIR validation tests — all passing
+- 11 Rule compiler tests — all passing
+- 20 Rule engine tests — all passing
+- 24 Golden fixture tests — all passing
+- 12 Package validation tests — all passing
+- 16 Dependency resolution tests — all passing
+- 6 Historical reproducibility tests — all passing
+- 23 Runtime security tests (existing) — all passing
+Total: 154 tests, all passing.
+
+TEST RESULTS:
+- Lint: 0 errors
+- Typecheck: 0 errors
+- Architecture tests: 24/24
+- RuleIR unit: 18/18
+- Rule compiler: 11/11
+- Rule engine: 20/20
+- Golden fixtures: 24/24
+- Package validation: 12/12
+- Dependency resolution: 16/16
+- Historical reproducibility: 6/6
+- Runtime security: 23/23
+- CI: 4/4 jobs green (lint+typecheck, arch-test, runtime-test, build)
+
+MIGRATIONS:
+- No schema changes (correlationId was added in prior sprint)
+- Provenance interface extended with packageId + packageVersion (compatible)
+
+KNOWN LIMITATIONS:
+1. In-memory rate limiting is per-instance on Vercel serverless (ADR 0016)
+2. Demo accounts exist in DB but hidden on production (NEXT_PUBLIC_DEMO_AUTH_ENABLED)
+3. ADR 0018 (claimed-vs-verified truth) is PROPOSED, not implemented — requires evidence pipeline
+4. The RuleCompiler normalizes condition trees but does not perform advanced optimization (e.g., constant folding, dead-code elimination). This is intentional — premature optimization is avoided per §22.
+
+ARCHITECTURE CONFLICTS:
+None. No new semantic primitives were needed. Package categories unchanged. No vertical logic in the kernel. Evaluation is deterministic without LLM inference. Historical reproducibility works under the existing package model. Package dependencies are representable.
+
+NO Ghana/Togo-specific rules were used in any test. All 24 golden fixtures use abstract 'test.rule.*' identifiers. The existing Ghana/Togo packages continue to work without modification.
