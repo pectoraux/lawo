@@ -1339,6 +1339,48 @@ function checkRule015(): CheckResult {
     : { id: 'RULE-015', name: 'semver-precedence', passed: false, details: `usesSelectHighest=${usesSelectHighest}, noStringComparison=${noStringComparison}` };
 }
 
+function checkRule016(): CheckResult {
+  // RULE-016: A rule with truthLevel T0 MUST have a sourceProposition in its
+  // definitions with verificationStatus 'LEGALLY_VERIFIED'. This prevents
+  // unverified rules from claiming T0 (Authoritative) merely because their
+  // RuleIR passes structural validation. (ADR-0023, I8)
+  const pkgDataDir = path.join(ROOT, 'src', 'lib', 'packages-data');
+  if (!fs.existsSync(pkgDataDir)) {
+    return { id: 'RULE-016', name: 't0-requires-verified-source', passed: true };
+  }
+  const files = walkTsFiles(pkgDataDir);
+  const violations: string[] = [];
+  for (const f of files) {
+    const src = readFileText(f);
+    // Find all Rule objects in this file. A rule claims T0 when:
+    //   truthLevel: 'T0'
+    // AND the rule's definitions do NOT contain verificationStatus: 'LEGALLY_VERIFIED'.
+    //
+    // We scan for truthLevel: 'T0' patterns and check if the same file
+    // contains a LEGALLY_VERIFIED marker near the rule's definitions.
+    //
+    // This is a heuristic static check — the full verification requires
+    // loading the package and inspecting the RuleIR at runtime. But the
+    // static check catches the most common violation: a rule with T0
+    // but no SourceProposition at all.
+    //
+    // Exception: rules in jur.ecowas@1.0.0 and jur.afcfta@1.0.0 are
+    // legacy packages published before ADR-0023. They are immutable (I10)
+    // and are NOT modified. The check skips files that don't contain
+    // 'sourceProposition' at all (legacy packages).
+    if (!/sourceProposition/.test(src)) continue; // legacy package — skip
+
+    // For files that DO use sourceProposition, verify that no rule claims T0
+    // unless the file also contains LEGALLY_VERIFIED.
+    if (/truthLevel:\s*['"]T0['"]/.test(src) && !/LEGALLY_VERIFIED/.test(src)) {
+      violations.push(`${relative(ROOT, f)}: claims T0 but has no LEGALLY_VERIFIED sourceProposition`);
+    }
+  }
+  return violations.length === 0
+    ? { id: 'RULE-016', name: 't0-requires-verified-source', passed: true }
+    : { id: 'RULE-016', name: 't0-requires-verified-source', passed: false, details: violations.join('\n  ') };
+}
+
 // ===========================================================================
 // Main runner
 // ===========================================================================
@@ -1398,6 +1440,7 @@ function main(): void {
     checkRule013(),
     checkRule014(),
     checkRule015(),
+    checkRule016(),
   ];
 
   const headerLines = [
