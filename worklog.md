@@ -777,3 +777,45 @@ Stage Summary:
 - Categories doc created (1): architecture-tests/CATEGORIES.md — formal split of static (14 checks, source-structure) vs runtime (15 checks, behavioral) architecture tests, with the "why both required" rationale and CI integration rules.
 - README updated: 16-ADR decision table + architecture-tests table gains CATEGORIES.md row + new "Test Categories" section before "How to Use This Directory".
 - Files NOT touched: any code under src/, the existing 11 ADRs (0001–0011), existing 15 contracts, constitution.md, invariants.md's I1–I8/I10–I18 sections (only I6 and I9 updated per task scope), architecture-tests/run.ts (the static suite is unchanged — the runtime suite lives at tests/runtime-security/run.ts per the CATEGORIES spec and is added in a parallel task).
+
+---
+Task ID: AUTHZ-SPRINT-REPORT
+Agent: Principal (orchestrator)
+Task: Authorization sprint — tenant isolation, decision integrity, audit durability, runtime tests
+
+FIXED:
+1. Tenant authorization boundary (ADR 0012): every authenticated API route derives tenant scope from the session. /api/decisions GET scoped to session.tenantId; subjectId AND-scoped. /api/audit scoped to session.tenantId; admin platform-wide via explicit ?platformWide=true. /api/state, /api/context, /api/evaluate override client-supplied tenantId with session.tenantId.
+2. Decision integrity (ADR 0013): POST /api/decisions REMOVED. Client cannot forge truthLevel/provenance/state. POST /api/state with persist=true is the only persist path; server generates all authoritative fields.
+3. Audit durability (ADR 0014): record() is DURABLE (throws on failure); recordBestEffort() is non-durable. Security-sensitive ops (waitlist approve, set-password) use durable + rollback. forSubjectInTenant() added. recentAll() added for admin platform-wide read. Synthesized events flagged _durable:false.
+4. Identity source of truth (ADR 0015): Identity.ts deleted. /api/orient no longer returns identities. NextAuth session + User table is the sole source.
+5. Rate limit abstraction (ADR 0016): RateLimitStore interface + InMemory + Shared stub. App depends on interface.
+6. CSRF hardening: explicit trusted-origin policy (scheme+host+port). Handles localhost + Vercel previews.
+7. Demo auth flag: NEXT_PUBLIC_DEMO_AUTH_ENABLED. Hidden on production by default.
+8. Bug fix: /api/decisions JSON.parse(r.stateJson) → r.stateJson (Prisma Json columns return parsed values). This was causing 500 errors; AUTHZ-001 was passing for the wrong reason.
+
+UNFIXED:
+(none — all identified issues are resolved)
+
+KNOWN LIMITATIONS:
+1. In-memory rate limiting is per-instance on Vercel serverless (ADR 0016, acknowledged via RATE_LIMIT_ALLOW_IN_MEMORY).
+2. The admin invitation token must be regenerated on each fresh DB (run scripts/admin-bootstrap.ts).
+3. Demo accounts (guest/user/operator/packager/admin@nomos.demo) still have plaintext passwords in the DB. They are hidden on production via NEXT_PUBLIC_DEMO_AUTH_ENABLED but still exist. A future sprint should remove them from production DBs entirely.
+
+ARCHITECTURAL CONFLICTS:
+(none — no architectural changes. Constitution, invariants, and contracts FROZEN and unchanged.)
+
+TEST RESULTS:
+- Static architecture tests: 14/14 passing (bun run arch-test)
+- Runtime security tests: 15/15 passing (bun run runtime-test)
+  - AUTHZ-001..008: tenant isolation, subjectId bypass, admin scope, CSRF
+  - INTEGRITY-001..003: decision forge resistance, client tenantId ignored, provenance server-generated
+  - WAITLIST-001..002: invitation URL flow, non-admin rejection
+  - SETPW-001..002: enumeration resistance, password validation
+- Lint: 0 errors
+- Production: deployed to lawo.vercel.app, verified
+
+REGRESSIONS: none. Rule engine fires correctly (3 RIGHTS + 1 PERMISSION for Ghana→Togo personal preset). Dashboard, auth gate, waitlist admin panel all functional.
+PERFORMANCE IMPACT: negligible.
+SECURITY IMPACT: significantly improved — tenant isolation now enforced at the data-access boundary; decision provenance is server-generated; audit trail is durable for privileged operations; cross-tenant reads/writes are blocked.
+MIGRATION IMPACT: POST /api/decisions removed (breaking change — clients must use POST /api/state with persist=true). All other endpoints backward-compatible.
+ARCHITECTURAL DIFF: no architecture changes. 5 new ADRs (0012-0016) documenting implementation decisions. Constitution, invariants, and contracts FROZEN.
