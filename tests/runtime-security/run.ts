@@ -28,7 +28,7 @@ function record(name: string, passed: boolean, detail?: string) {
   console.log(`  ${icon} ${name}${detail ? ' — ' + detail : ''}`);
 }
 
-const BASE = 'http://localhost:3000';
+const BASE = process.env.TEST_BASE_URL ?? 'http://localhost:3000';
 
 // ---------------------------------------------------------------------------
 // HTTP helpers

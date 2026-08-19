@@ -122,22 +122,24 @@ jobs:
         run: bun run scripts/seed-users.ts
 
       - name: Start dev server and run runtime tests
+        env:
+          TEST_BASE_URL: http://127.0.0.1:3000
         run: |
           # Start the dev server in the background WITHIN this step.
           # Each GitHub Actions step runs in its own shell, so the server
           # must be started and tested in the same step to stay alive.
           nohup bunx next dev -p 3000 > server.log 2>&1 &
           SERVER_PID=$!
-          # Wait for the server to be ready
+          # Wait for the server to be ready (try both localhost and 127.0.0.1)
           for i in $(seq 1 60); do
-            if curl -s --max-time 2 -o /dev/null http://localhost:3000/api/auth/csrf; then
+            if curl -s --max-time 2 -o /dev/null http://127.0.0.1:3000/api/auth/csrf; then
               echo "Server ready after ${i}s"
               break
             fi
             sleep 1
           done
           # Final health check
-          curl -s --max-time 5 -o /dev/null http://localhost:3000/api/auth/csrf || (echo "Server failed to start" && cat server.log && exit 1)
+          curl -s --max-time 5 -o /dev/null http://127.0.0.1:3000/api/auth/csrf || (echo "Server failed to start" && cat server.log && exit 1)
           # Run the tests while the server is still running in this step
           bun run tests/runtime-security/run.ts
           TEST_EXIT=$?
