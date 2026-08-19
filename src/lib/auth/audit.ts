@@ -26,13 +26,20 @@ export interface RecordAuditInput {
 
 const SENSITIVE_KEY_RE = /password|token|secret|hash|credential/i;
 
-function sanitize(obj: Record<string, unknown>): Record<string, unknown> {
+/**
+ * Sanitize an audit payload — strips sensitive keys (password, token, secret,
+ * hash, credential) by replacing their values with '[REDACTED]'. Recursively
+ * sanitizes nested objects. Exported so route handlers can sanitize payloads
+ * before writing audit events directly via a transaction-bound Prisma client
+ * (which bypasses the recordAudit() helper that uses the global db client).
+ */
+export function sanitizeAuditPayload(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (SENSITIVE_KEY_RE.test(k)) {
       out[k] = '[REDACTED]';
     } else if (v && typeof v === 'object' && !Array.isArray(v)) {
-      out[k] = sanitize(v as Record<string, unknown>);
+      out[k] = sanitizeAuditPayload(v as Record<string, unknown>);
     } else {
       out[k] = v;
     }
@@ -47,7 +54,7 @@ function sanitize(obj: Record<string, unknown>): Record<string, unknown> {
  */
 export async function recordAudit(input: RecordAuditInput): Promise<void> {
   const auditLog = createDbAuditLog();
-  const sanitizedPayload = sanitize(input.payload);
+  const sanitizedPayload = sanitizeAuditPayload(input.payload);
   await auditLog.record({
     tenantId: input.tenantId ?? null,
     actor: input.actor,
@@ -65,7 +72,7 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
 export async function recordAuditBestEffort(input: RecordAuditInput): Promise<void> {
   try {
     const auditLog = createDbAuditLog();
-    const sanitizedPayload = sanitize(input.payload);
+    const sanitizedPayload = sanitizeAuditPayload(input.payload);
     await auditLog.recordBestEffort({
       tenantId: input.tenantId ?? null,
       actor: input.actor,

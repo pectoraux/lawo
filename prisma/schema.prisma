@@ -225,9 +225,15 @@ model AuditEvent {
   timestamp   DateTime     @default(now())
   severity    AuditSeverity @default(INFO)
   payloadJson Json
+  // Explicit correlation identifier linking this audit event to the
+  // DecisionRecord it documents. Set on durable audit events created in
+  // the same $transaction as the DecisionRecord. Nullable for events not
+  // tied to a specific decision (waitlist, auth, etc.).
+  correlationId String?
 
   @@index([tenantId, timestamp])
   @@index([severity])
+  @@index([correlationId])
 }
 
 // -----------------------------------------------------------------------------
@@ -246,9 +252,15 @@ model DecisionRecord {
   asOf            DateTime
   computedAt      DateTime
   truthLevel      TruthLevel  @default(T0)
+  // Explicit correlation identifier. Matches AuditEvent.correlationId so
+  // a decision and its durable audit event are bidirectionally linked.
+  // decisionId is the canonical correlation key; this column is redundant
+  // for query convenience (avoids JSON-path lookup on the audit side).
+  correlationId   String?
 
   @@index([tenantId, computedAt])
   @@index([subjectId])
+  @@index([correlationId])
 }
 
 // -----------------------------------------------------------------------------
